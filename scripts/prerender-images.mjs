@@ -60,7 +60,13 @@ async function main() {
 
   const results = [];
   for (const row of clusters) {
-    const disciplineKey = row.disciplinekey || slugify(row.bundlename);
+    // FIX: Sheet-Spalte heisst "discipline_key" (mit Unterstrich), aber
+    // normalizeRow() entfernt Unterstriche nicht -- nur row.disciplinekey
+    // (ohne Unterstrich) wurde bisher geprueft, war daher IMMER undefined,
+    // wodurch der bundlename-Fallback bei JEDER Zeile griff (bei den
+    // meisten Sportarten zufaellig unauffaellig, bei "US Sports" mit
+    // langem Mitglieder-bundleName sichtbar falsch).
+    const disciplineKey = row.discipline_key || row.disciplinekey || slugify(row.bundlename);
     const displayName = row.displayname || row.bundlename || disciplineKey;
     const altText = `${displayName} Daten & API Coverage – HEIM:SPIEL`.substring(0, 120);
     const filename = `${slugify(disciplineKey)}-hero.webp`;
