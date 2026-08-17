@@ -12,12 +12,6 @@ function slugify(str) {
     .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
-// Google Drive's /thumbnail-Endpunkt liefert eine von Google bereits stark
-// komprimierte, auf max. sz=w1536 herunterskalierte Vorschau -- NICHT die
-// Originaldatei. Das erklaerte die schlechte Bildqualitaet trotz hoher
-// WebP-Qualitaetseinstellung: das Ausgangsmaterial war schon detailarm.
-// Diese Funktion extrahiert die Datei-ID und baut die Direct-Download-URL,
-// die die Originaldatei unveraendert ausliefert.
 function toDriveDirectDownloadUrl(url) {
   const match = String(url || "").match(/[?&]id=([a-zA-Z0-9_-]+)/) || String(url || "").match(/\/d\/([a-zA-Z0-9_-]+)/);
   if (!match) return url;
@@ -54,7 +48,7 @@ async function downloadImage(url) {
 async function toWebp(buf) {
   return sharp(buf)
     .resize({ width: 1920, withoutEnlargement: true })
-    .webp({ quality: 88, effort: 6 })
+    .webp({ quality: 100, lossless: false, effort: 6 })
     .toBuffer();
 }
 
