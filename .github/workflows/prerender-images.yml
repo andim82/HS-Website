@@ -1,0 +1,23 @@
+name: Prerender - Hero Images to WebP
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  convert-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install
+      - run: node scripts/prerender-images.mjs
+        env:
+          WP_BASE_URL: https://heimspiel.de
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-mapping
+          path: output/image-mapping.json
