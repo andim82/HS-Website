@@ -49,7 +49,11 @@ async function toWebp(buf) {
 async function uploadToWp(webpBuf, filename, altText, title) {
   const res = await fetch(`${WP_BASE}/wp-json/hs-cache/v1/prerender/media`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: AUTH_HEADER },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: AUTH_HEADER,
+      "User-Agent": "HS-Prerender-Bot/1.0 (+github-actions)",
+    },
     body: JSON.stringify({
       filename,
       mime_type: "image/webp",
@@ -58,9 +62,11 @@ async function uploadToWp(webpBuf, filename, altText, title) {
       title,
     }),
   });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error || `Upload HTTP ${res.status}`);
-  return json; // { id, url }
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(json.code ? `${json.code}: ${json.message}` : `Upload HTTP ${res.status}`);
+  }
+  return json;
 }
 
 async function main() {
