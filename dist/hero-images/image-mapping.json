@@ -1,30 +1,30 @@
 [
   {
-    "disciplineKey": "wintersport",
+    "disciplineKey": "winter-sports",
     "oldUrl": "https://drive.google.com/thumbnail?id=1qnNXqXFiJPFD2XtbG0ZnXtY72SGqLf3U&sz=w1536",
-    "filename": "wintersport-hero.webp",
-    "repoPath": "dist/hero-images/wintersport-hero.webp",
-    "rawUrl": "https://raw.githubusercontent.com/andim82/HS-Website/main/dist/hero-images/wintersport-hero.webp",
+    "filename": "winter-sports-hero.webp",
+    "repoPath": "dist/hero-images/winter-sports-hero.webp",
+    "rawUrl": "https://raw.githubusercontent.com/andim82/HS-Website/main/dist/hero-images/winter-sports-hero.webp",
     "altText": "Winter Sports Daten & API Coverage – HEIM:SPIEL",
     "title": "Winter Sports",
     "status": "ok"
   },
   {
-    "disciplineKey": "fussball",
+    "disciplineKey": "football",
     "oldUrl": "https://drive.google.com/thumbnail?id=1xftkgN-M-jxPtgEszYtP7I99u-wYbPLU&sz=w1536",
-    "filename": "fussball-hero.webp",
-    "repoPath": "dist/hero-images/fussball-hero.webp",
-    "rawUrl": "https://raw.githubusercontent.com/andim82/HS-Website/main/dist/hero-images/fussball-hero.webp",
+    "filename": "football-hero.webp",
+    "repoPath": "dist/hero-images/football-hero.webp",
+    "rawUrl": "https://raw.githubusercontent.com/andim82/HS-Website/main/dist/hero-images/football-hero.webp",
     "altText": "Football Daten & API Coverage – HEIM:SPIEL",
     "title": "Football",
     "status": "ok"
   },
   {
-    "disciplineKey": "basketball-american-football-eishockey-fussball",
+    "disciplineKey": "us-sports",
     "oldUrl": "https://drive.google.com/thumbnail?id=1_LpWUI10kz36puyK9-UFMMxOhDjr_Uaf&sz=w1536",
-    "filename": "basketball-american-football-eishockey-fussball-hero.webp",
-    "repoPath": "dist/hero-images/basketball-american-football-eishockey-fussball-hero.webp",
-    "rawUrl": "https://raw.githubusercontent.com/andim82/HS-Website/main/dist/hero-images/basketball-american-football-eishockey-fussball-hero.webp",
+    "filename": "us-sports-hero.webp",
+    "repoPath": "dist/hero-images/us-sports-hero.webp",
+    "rawUrl": "https://raw.githubusercontent.com/andim82/HS-Website/main/dist/hero-images/us-sports-hero.webp",
     "altText": "US Sports Daten & API Coverage – HEIM:SPIEL",
     "title": "US Sports",
     "status": "ok"
@@ -40,11 +40,11 @@
     "status": "ok"
   },
   {
-    "disciplineKey": "eishockey",
+    "disciplineKey": "ice-hockey",
     "oldUrl": "https://drive.google.com/thumbnail?id=1f022ifggy54v8OikTr2qhCqjXGvO7fEN&sz=w1536",
-    "filename": "eishockey-hero.webp",
-    "repoPath": "dist/hero-images/eishockey-hero.webp",
-    "rawUrl": "https://raw.githubusercontent.com/andim82/HS-Website/main/dist/hero-images/eishockey-hero.webp",
+    "filename": "ice-hockey-hero.webp",
+    "repoPath": "dist/hero-images/ice-hockey-hero.webp",
+    "rawUrl": "https://raw.githubusercontent.com/andim82/HS-Website/main/dist/hero-images/ice-hockey-hero.webp",
     "altText": "Ice Hockey Daten & API Coverage – HEIM:SPIEL",
     "title": "Ice Hockey",
     "status": "ok"
@@ -60,11 +60,11 @@
     "status": "ok"
   },
   {
-    "disciplineKey": "fussball",
+    "disciplineKey": "1-fc-koeln-club-package",
     "oldUrl": "https://drive.google.com/thumbnail?id=1xftkgN-M-jxPtgEszYtP7I99u-wYbPLU&sz=w1536",
-    "filename": "fussball-hero.webp",
-    "repoPath": "dist/hero-images/fussball-hero.webp",
-    "rawUrl": "https://raw.githubusercontent.com/andim82/HS-Website/main/dist/hero-images/fussball-hero.webp",
+    "filename": "1-fc-koeln-club-package-hero.webp",
+    "repoPath": "dist/hero-images/1-fc-koeln-club-package-hero.webp",
+    "rawUrl": "https://raw.githubusercontent.com/andim82/HS-Website/main/dist/hero-images/1-fc-koeln-club-package-hero.webp",
     "altText": "football Daten & API Coverage – HEIM:SPIEL",
     "title": "football",
     "status": "ok"
