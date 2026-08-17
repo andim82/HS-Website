@@ -34,6 +34,25 @@
   const pageLang = (document.documentElement.lang || "en").toLowerCase().substring(0, 2);
   const isDE     = pageLang === "de";
 
+// NEU: Muss VOR dem ersten renderLoader()-Aufruf stehen (der synchron ganz
+// oben im Skript laeuft) -- sonst ist LOADER_TEXT zur Laufzeit noch undefined
+// (var-Deklarationen werden gehoistet, Wertzuweisungen NICHT).
+var LOADER_TEXT = {
+  de: "Daten werden geladen\u2026",
+  en: "Loading data\u2026",
+  fr: "Chargement des donn\u00e9es\u2026",
+  es: "Cargando datos\u2026",
+  it: "Caricamento dati in corso\u2026"
+};
+
+function renderLoader() {
+  var txt = LOADER_TEXT[pageLang] || LOADER_TEXT.en;
+  return '<div style="padding:4rem;text-align:center;font-family:Lato,sans-serif;">' +
+    '<div style="display:inline-block;width:32px;height:32px;border:3px solid #e75519;border-top-color:transparent;border-radius:50%;animation:hsSpin .8s linear infinite;"></div>' +
+    '<p style="color:#6b7280;margin-top:1rem;font-size:.9rem;">' + txt + '</p>' +
+    '</div>';
+}
+
   /**
    * resolveUrl(url) -- v82
    * Stellt sicher dass interne relative URLs auf DE-Seiten das /de/-Präfix erhalten.
@@ -110,27 +129,61 @@
   // Sheety liefert Keys exakt wie der Spaltenname im Sheet (lowercase erster Buchstabe).
   // Kurzbezeichner aus der Tabelle oben werden direkt abgebildet.
 
-  function f(obj, key, fallback) {
-    if (!obj) return fallback || "";
-    // Exact match first
-    if (obj[key] !== undefined && String(obj[key]).trim() !== "") {
-      return String(obj[key]).trim();
-    }
-    // Case-insensitive fallback (handles WP cache lowercasing keys)
-    var lk = key.toLowerCase();
-    for (var k in obj) {
-      if (k.toLowerCase() === lk && String(obj[k]).trim() !== "") {
-        return String(obj[k]).trim();
-      }
-    }
-    return fallback || "";
+function f(obj, key, fallback) {
+  if (!obj) return fallback || "";
+  // Exact match first
+  if (obj[key] !== undefined && String(obj[key]).trim() !== "") {
+    return String(obj[key]).trim();
   }
+  var lk = key.toLowerCase();
+  for (var k in obj) {
+    if (k.toLowerCase() === lk && String(obj[k]).trim() !== "") {
+      return String(obj[k]).trim();
+    }
+  }
+  return fallback || "";
+}
 
-  // Mehrzeilige Zelle parsen (Alt+Enter = \n im CSV-Export)
-  function parseList(str) {
-    if (!str) return [];
-    return str.split(/\n|\\n|;/).map(function(s) { return s.trim(); }).filter(Boolean);
-  }
+// Mehrzeilige Zelle parsen (Alt+Enter = \n im CSV-Export)
+function parseList(str) {
+  if (!str) return [];
+  return str.split(/\n|\\n|;/).map(function(s) { return s.trim(); }).filter(Boolean);
+}
+
+// Mini-Template-Engine fuer SEO-FAQ-Texte aus dem Sheet.
+// Unterstuetzt:
+//   {displayName} / {bundleName}   -- einfacher Text-Platzhalter
+//   {preEvent} {live} {postEvent} {imageLibrary} -- Alt+Enter-Listen aus dem
+//     Sheet, natuerlich verknuepft ("A, B and C")
+//   {{#feld}}...{{/feld}}          -- Block wird nur gerendert, wenn das
+//     Sheet-Feld "feld" truthy ist (z.B. liveCompetitions > 0)
+function joinListNatural(items) {
+  if (!items || !items.length) return "";
+  if (items.length === 1) return items[0];
+  return items.slice(0, -1).join(", ") + " and " + items[items.length - 1];
+}
+
+function fillPlaceholders(str, obj) {
+  if (!str) return str;
+  var out = str;
+
+  out = out.replace(/\{\{#(\w+)\}\}([\s\S]*?)\{\{\/\1\}\}/g, function(match, key, inner) {
+    var val = f(obj, key, "");
+    var num = parseFloat(val);
+    var truthy = !isNaN(num) ? num > 0 : !!(val && String(val).trim());
+    return truthy ? inner : "";
+  });
+
+  ["preEvent", "live", "postEvent", "imageLibrary"].forEach(function(key) {
+    var items = parseList(f(obj, key, ""));
+    out = out.replace(new RegExp("\\{" + key + "\\}", "g"), joinListNatural(items));
+  });
+
+  var dispName = f(obj, "displayName", f(obj, "bundleName", (obj && obj.name) || ""));
+  out = out.replace(/\{displayName\}/g, dispName).replace(/\{bundleName\}/g, dispName);
+
+  return out;
+}
 
   // ── Data fetching ─────────────────────────────────────────────────────────
 
@@ -287,9 +340,11 @@ async function fetchSheetCSV(gid) {
           (d.bundle || "").toLowerCase().split(",").map(function(s){return s.trim();}).indexOf(bundleKey.toLowerCase()) !== -1
       );
     }
-    function inBundle(d) {
+  const canonicalBundleValue = (clusterMeta && clusterMeta.bundle) ? clusterMeta.bundle : bundleKey;
+
+  function inBundle(d) {
       return (d.bundle || "").split(",").map(function(s){ return s.trim().toLowerCase(); })
-        .indexOf(bundleKey.toLowerCase()) !== -1;
+        .indexOf(canonicalBundleValue.toLowerCase()) !== -1;
     }
   const disciplines = index.filter(
     (d) => inBundle(d) && (d.type || "").toLowerCase() !== "cluster"
@@ -314,7 +369,8 @@ async function fetchSheetCSV(gid) {
   // Sport-Tabs stammen, siehe hs_build_bundle_coverage() im Backend). Kein
   // Laender-/Foederations-Ausklappblock, keine general-purpose-Disziplin-
   // Kacheln -- unabhaengig davon, ob 1 oder mehrere Sportarten beteiligt sind.
-  const isBundleTemplate = (b.clustertemplate || "").toLowerCase() === "bundle";
+  const rawClusterTemplate = (b.clustertemplate || "").toLowerCase();
+  const isBundleTemplate = rawClusterTemplate === "bundle" || rawClusterTemplate === "clubbundle";
 
 
     // NEU: Fuer das Bundle-Template (mehrere Sport-Tabs kuratiert zusammengefuehrt)
@@ -435,7 +491,19 @@ const totalEvents = disciplineData.reduce((s, d) => s + d.total_events, 0);
         })
       : [];
 
-    const hasTopCompetitions = hasConfiguredTopCompetitions && validTopCompetitions.length > 0;
+   const hasTopCompetitions = hasConfiguredTopCompetitions && validTopCompetitions.length > 0;
+
+    // FIX: Sportart-Pille nur zeigen, wenn es sich um ein Bundle-Template
+    // handelt UND die kuratierten Top Competitions tatsaechlich mehr als
+    // eine unterschiedliche Sportart abdecken (z.B. US Sports: NBA+NHL+NFL+
+    // Bundesliga). Bei Single-Sport-Seiten (American Football) oder Bundles
+    // mit nur einer Sportart bleibt die Pille aus.
+    const distinctSportsInTop = new Set(
+      (validTopCompetitions || [])
+        .map(function(c) { return (c.sport || "").trim().toLowerCase(); })
+        .filter(Boolean)
+    );
+    const showSportPill = isBundleTemplate && distinctSportsInTop.size > 1;
 
 const sportKeyToDisplayName = {};
 
@@ -452,10 +520,10 @@ root.innerHTML = renderHeroCluster(bundleName, b, g) + renderStatsBar(statBarVal
 (isBundleTemplate
   ? renderCoverageIntro(b, g) +
     (hasTopCompetitions
-      ? renderTopCompetitionsCards(validTopCompetitions, b, g, normalizedBundleKey, sportKeyToDisplayName)
+      ? renderTopCompetitionsCards(validTopCompetitions, b, g, normalizedBundleKey, sportKeyToDisplayName, showSportPill)
       : '<section class="hs-cards-section"><div class="hs-container"><p style="text-align:center;color:#888;padding:2rem;">' + (f(b, "labelNoCompetitions", g.labelnocompetitions || "Keine Wettbewerbe konfiguriert.")) + '</p></div></section>')
   : (useCoverageMode ? renderCoverageIntro(b, g) : "") +
-    (useCoverageMode && hasTopCompetitions ? renderTopCompetitionsCards(validTopCompetitions, b, g, normalizedBundleKey) : "") +
+    (useCoverageMode && hasTopCompetitions ? renderTopCompetitionsCards(validTopCompetitions, b, g, normalizedBundleKey, sportKeyToDisplayName, showSportPill) : "") +
     (useCoverageMode ? renderCoverageCards(coverageData, b, g, normalizedBundleKey, !hasTopCompetitions) : renderClusterCards(disciplineData, b, g))
 ) +
 renderSubTextSeparator(b, g) +
@@ -510,23 +578,32 @@ renderSubTextSeparator(b, g) +
       setTxt(r.querySelector('.hs-related-title'), g.relatedtitle);
 
       // ── SEO-FAQ Variablen (Cluster) ──────────────────────────────────────
+      
       seoVars = {
         sportartName: f(b, "displayName", bundleName),
+        displayName: f(b, "displayName", bundleName),
+	sportEyebrow: f(b, "sportEyebrow", ""),
         totalCompetitions: useCoverageMode ? ((coverageData && coverageData.totalCompetitions) || "") : disciplineData.length,
         totalCountries: useCoverageMode ? ((coverageData && coverageData.totalCountries) || "") : "",
-        livetickCount: isBundleTemplate ? ((bundleTotals && bundleTotals.livetickCount) || "") : (useCoverageMode ? f(b, "livetickCount", "") : totalLive),
-        liveCompetitions: isBundleTemplate ? ((bundleTotals && bundleTotals.liveCompetitions) || "") : (useCoverageMode ? f(b, "liveCompetitions", "") : totalEvents),
+        livetickCount: isBundleTemplate ? ((bundleTotals && bundleTotals.livetickCount) || "") : (useCoverageMode ? ((coverageData && coverageData.totalLiveTicker) || 0) : totalLive),
+liveCompetitions: isBundleTemplate ? ((bundleTotals && bundleTotals.liveCompetitions) || "") : (useCoverageMode ? (f(b, "liveCompetitions", "") || 0) : totalEvents),
+livetickCount: isBundleTemplate ? ((bundleTotals && bundleTotals.livetickCount) || "") : (useCoverageMode ? (f(b, "livetickCount", "") || 0) : totalLive),
         topLeagueNamesList: useCoverageMode ? buildTopLeagueNamesList(validTopCompetitions) : "",
         preEvent: formatEnumeration(f(b, "preEvent", "")),
         live: formatEnumeration(f(b, "live", "")),
         postEvent: formatEnumeration(f(b, "postEvent", "")),
-        // NEU: Ermoeglicht eine Bundle/Nicht-Bundle-Textweiche direkt im
-        // Sheet-Template-Text via {{#isBundleTemplate}}...{{/isBundleTemplate}}
-        // bzw. {{#isNotBundleTemplate}}...{{/isNotBundleTemplate}} -- ohne
-        // dass fuer jede zukuenftige Formulierungsaenderung wieder Code
-        // angefasst werden muss.
         isBundleTemplate: isBundleTemplate,
-        isNotBundleTemplate: !isBundleTemplate
+        isNotBundleTemplate: !isBundleTemplate,
+        eyebrow: f(b, "eyebrow", ""),
+        name: f(b, "name", ""),
+ 	  bundleName: bundleName,
+        labelSports: f(b, "labelSports", g.labelsports || ""),
+        labelEvents: f(b, "labelEvents", g.labelevents || ""),
+        labelLive: f(b, "labelLive", g.labellive || ""),
+        labelLiveticker: f(b, "labelLiveticker", g.labelliveticker || ""),
+        detailsText: f(b, "detailsText", g.detailstext || ""),
+        labelTopCompetitions: f(b, "labelTopCompetitions", g.labeltopcompetitions || ""),
+        labelFederations: g.labelfederations || ""
       };
 
       whyFaqItems = buildWhyFaqItems(g, seoVars);
@@ -835,8 +912,8 @@ const liveCompetitions = parseInt(disc.livecompetitions) || 0;
           var item = d.getElementById("faq-" + i);
           if (!item) continue;
           var si = i + 1;
-          setTxt(item.querySelector(".faq-trigger-title"), g["faq" + si + "headline"]);
-          setTxt(item.querySelector(".faq-desc"),          g["faq" + si + "text"]);
+setTxt(item.querySelector('.faq-trigger-title'), fillPlaceholders(g['faq' + si + 'headline'], disc));
+setTxt(item.querySelector('.faq-desc'), fillPlaceholders(g['faq' + si + 'text'], disc));
         }
       }
       var trust = d.getElementById("trust");
@@ -885,6 +962,8 @@ const liveCompetitions = parseInt(disc.livecompetitions) || 0;
       // ── SEO-FAQ Variablen (Detail) ──────────────────────────────────────
       var seoVars = {
         sportartName: f(disc, "displayName", disc.name),
+		displayName: f(disc, "displayName", disc.name),
+		sportEyebrow: f(disc, "sportEyebrow", ""), 
         totalCompetitions: totalEvents,
         totalCountries: "",
         livetickCount: livetickCount,
@@ -1467,9 +1546,22 @@ items.push({
       var rawUrl = match ? (isDE ? (match.detailurl || "") : (match.url || match.clusterurl || match.detailurl || "")) : "";
       var url    = resolveUrl(rawUrl);
       var grad = serviceGradient(name);
-      var inner = '<div class="hs-rel-card-inner" style="background:' + grad + ';">' +
-        '<span class="hs-rel-card-name">' + name + '</span>' +
-        (url ? '<span class="hs-rel-card-arrow">\u2192</span>' : "") +
+
+      // NEU: Falls das verlinkte Package verfuegbar ist (echte url) UND
+      // eine heroBgUrl im Index Sheet gepflegt hat, wird dessen Hero-Bild
+      // mit 50% Opacity als Hintergrund-Layer HINTER dem Gradient/Text
+      // eingeblendet. Ohne gueltige url (kein Match/kein Link) oder ohne
+      // heroBgUrl bleibt die Kachel wie bisher rein im Gradient-Look.
+      var heroBgUrl = match ? f(match, "heroBgUrl", "") : "";
+      var showBg = !!(url && heroBgUrl);
+      var bgLayerHtml = showBg
+        ? '<div class="hs-rel-card-bgimg" style="position:absolute;inset:0;background-image:url(\'' + heroBgUrl.replace(/'/g, "%27") + '\');background-size:cover;background-position:center;opacity:.5;z-index:0;"></div>'
+        : "";
+
+      var inner = '<div class="hs-rel-card-inner" style="position:relative;overflow:hidden;background:' + grad + ';">' +
+        bgLayerHtml +
+        '<span class="hs-rel-card-name" style="position:relative;z-index:1;">' + name + '</span>' +
+        (url ? '<span class="hs-rel-card-arrow" style="position:relative;z-index:1;">\u2192</span>' : "") +
       '</div>';
       return url
         ? '<a href="' + url + '" class="hs-rel-card">' + inner + '</a>'
@@ -1618,14 +1710,6 @@ items.push({
       seoOpts.faqItems = updatedFaqItems;
       injectSEO(seoOpts);
     }
-  }
-
-
-  function renderLoader() {
-    return '<div style="padding:4rem;text-align:center;font-family:Lato,sans-serif;">' +
-      '<div style="display:inline-block;width:32px;height:32px;border:3px solid #e75519;border-top-color:transparent;border-radius:50%;animation:hsSpin .8s linear infinite;"></div>' +
-      '<p style="color:#6b7280;margin-top:1rem;font-size:.9rem;">Daten werden geladen\u2026</p>' +
-      '</div>';
   }
 
   // ── Hero Cluster ──────────────────────────────────────────────────────────
@@ -2005,6 +2089,7 @@ items.push({
     var labelStats = (g.labelstatscol || "Statistiken");
     var labelTop = (g.labeltopcompetitions || "Top Wettbewerbe");
     var labelRest = (g.labelothercompetitions || "Weitere Wettbewerbe");
+    var labelOnRequest = (g.labelonrequest || "Auf Anfrage");
 
     if (!comps.length) {
       panelEl.innerHTML = '<p class="hs-no-data" style="padding:.5rem 0;">–</p>';
@@ -2044,7 +2129,7 @@ items.push({
           '<td class="hs-event-stats" data-label="' + labelStats + '">' + statsPillsHtml(c.statsList) + '</td>' +
           '<td class="hs-tc-col-num" data-label="' + labelMatches + '">' + (c.seasonMatches || 0) + '</td>' +
           '<td class="hs-tc-col-num" data-label="' + labelLiveScores + '">' + (c.liveScores || 0) + '</td>' +
-          '<td class="hs-tc-col-num" data-label="' + labelLiveTicker + '">' + (c.liveTicker > 0 ? '<span class="hs-lt-yes">\u2713</span>' : '<span class="hs-lt-no">\u2013</span>') + '</td>' +
+          '<td class="hs-tc-col-num" data-label="' + labelLiveTicker + '">' + (c.liveTicker > 0 ? '<span class="hs-lt-yes">\u2713</span>' : '<span class="hs-lt-no">' + labelOnRequest + '</span>') + '</td>' +
         '</tr>'
       );
     }
@@ -2097,10 +2182,16 @@ items.push({
     }
   };
 
- function renderTopCompetitionsCards(topCompetitions, b, g, bundleKey, sportKeyToDisplayName) {
+function renderTopCompetitionsCards(topCompetitions, b, g, bundleKey, sportKeyToDisplayName, showSportPill) {
     sportKeyToDisplayName = sportKeyToDisplayName || {};
+    // FIX: Sportart-Pille darf NUR bei Bundle-Templates mit mehreren
+    // unterschiedlichen Sportarten erscheinen (z.B. US Sports), nicht bei
+    // Single-Sport-Coverage-Seiten wie American Football, wo c.sport zwar
+    // gesetzt ist, aber irrelevant fuer die Anzeige sein soll.
+    showSportPill = !!showSportPill;
 
     if (!topCompetitions || !topCompetitions.length) return "";
+
     topCompetitions = topCompetitions.filter(function(c) {
       if (!c) return false;
       var hasRealTarget = !!((c.competition_id && String(c.competition_id).trim() !== "") || (c.detail_url && String(c.detail_url).trim() !== ""));
@@ -2118,9 +2209,9 @@ items.push({
       var panelId = "hs-tc-panel-" + bundleKey + "-" + idx;
       window.hsCompetitionPanelData[panelId] = { competitions: [c], groupLabel: displayLabel };
 
-      var sportKeyRaw = (c.sport && String(c.sport).trim() !== "") ? String(c.sport).trim() : "";
+	var sportKeyRaw = (c.sport && String(c.sport).trim() !== "") ? String(c.sport).trim() : "";
       var sportDisplayName = sportKeyRaw ? (sportKeyToDisplayName[sportKeyRaw.toLowerCase()] || sportKeyRaw) : "";
-      var hasSport = sportDisplayName !== "";
+      var hasSport = showSportPill && sportDisplayName !== "";
 
       var wrapStyle = "display:block !important;position:relative !important;" + (hasSport ? "padding-top:10px !important;" : "");
       var sportPillHtml = "";
