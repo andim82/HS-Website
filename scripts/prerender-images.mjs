@@ -36,8 +36,8 @@ async function downloadImage(url) {
 
 async function toWebp(buf) {
   return sharp(buf)
-    .resize({ width: 1600, withoutEnlargement: true })
-    .webp({ quality: 78 })
+    .resize({ width: 1920, withoutEnlargement: true })
+    .webp({ quality: 88, effort: 6 })
     .toBuffer();
 }
 
@@ -56,13 +56,6 @@ async function main() {
 
   const repo = process.env.GITHUB_REPOSITORY || "andim82/HS-Website";
   const branch = process.env.GITHUB_REF_NAME || "main";
-  // Zurueck zu raw.githubusercontent.com (jsDelivr hat das erst am
-  // 13.08.2026 angelegte Repo offenbar noch nicht indexiert -- 404
-  // "Failed to fetch ... from GitHub" trotz oeffentlichem Repo und
-  // vorhandener Datei). raw.githubusercontent.com funktioniert zuverlaessig,
-  // die 429-Rate-Limit-Sperre von vorhin war offenbar temporaer; die
-  // PHP-seitige Retry-Logik (hs_http_get_with_retry) faengt kuenftige
-  // kurze Sperren zusaetzlich ab.
   const rawBase = `https://raw.githubusercontent.com/${repo}/${branch}/${OUT_DIR}`;
 
   const results = [];
