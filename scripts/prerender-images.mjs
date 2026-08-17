@@ -56,11 +56,14 @@ async function main() {
 
   const repo = process.env.GITHUB_REPOSITORY || "andim82/HS-Website";
   const branch = process.env.GITHUB_REF_NAME || "main";
-  // jsDelivr-CDN statt raw.githubusercontent.com: deutlich grosszuegigere
-  // Rate-Limits, speziell fuer genau diesen Massenzugriffs-Anwendungsfall
-  // gebaut (raw.githubusercontent.com gab bei wiederholten Zugriffen von
-  // einer (haeufig geteilten) Hosting-IP HTTP 429 zurueck).
-  const rawBase = `https://cdn.jsdelivr.net/gh/${repo}@${branch}/${OUT_DIR}`;
+  // Zurueck zu raw.githubusercontent.com (jsDelivr hat das erst am
+  // 13.08.2026 angelegte Repo offenbar noch nicht indexiert -- 404
+  // "Failed to fetch ... from GitHub" trotz oeffentlichem Repo und
+  // vorhandener Datei). raw.githubusercontent.com funktioniert zuverlaessig,
+  // die 429-Rate-Limit-Sperre von vorhin war offenbar temporaer; die
+  // PHP-seitige Retry-Logik (hs_http_get_with_retry) faengt kuenftige
+  // kurze Sperren zusaetzlich ab.
+  const rawBase = `https://raw.githubusercontent.com/${repo}/${branch}/${OUT_DIR}`;
 
   const results = [];
   for (const row of clusters) {
