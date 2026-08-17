@@ -4,7 +4,7 @@
     "oldUrl": "https://drive.google.com/thumbnail?id=1qnNXqXFiJPFD2XtbG0ZnXtY72SGqLf3U&sz=w1536",
     "filename": "wintersport-hero.webp",
     "repoPath": "dist/hero-images/wintersport-hero.webp",
-    "rawUrl": "https://raw.githubusercontent.com/andim82/HS-Website/main/dist/hero-images/wintersport-hero.webp",
+    "rawUrl": "https://cdn.jsdelivr.net/gh/andim82/HS-Website@main/dist/hero-images/wintersport-hero.webp",
     "altText": "Winter Sports Daten & API Coverage – HEIM:SPIEL",
     "title": "Winter Sports",
     "status": "ok"
@@ -14,7 +14,7 @@
     "oldUrl": "https://drive.google.com/thumbnail?id=1xftkgN-M-jxPtgEszYtP7I99u-wYbPLU&sz=w1536",
     "filename": "fussball-hero.webp",
     "repoPath": "dist/hero-images/fussball-hero.webp",
-    "rawUrl": "https://raw.githubusercontent.com/andim82/HS-Website/main/dist/hero-images/fussball-hero.webp",
+    "rawUrl": "https://cdn.jsdelivr.net/gh/andim82/HS-Website@main/dist/hero-images/fussball-hero.webp",
     "altText": "Football Daten & API Coverage – HEIM:SPIEL",
     "title": "Football",
     "status": "ok"
@@ -24,7 +24,7 @@
     "oldUrl": "https://drive.google.com/thumbnail?id=1_LpWUI10kz36puyK9-UFMMxOhDjr_Uaf&sz=w1536",
     "filename": "basketball-american-football-eishockey-fussball-hero.webp",
     "repoPath": "dist/hero-images/basketball-american-football-eishockey-fussball-hero.webp",
-    "rawUrl": "https://raw.githubusercontent.com/andim82/HS-Website/main/dist/hero-images/basketball-american-football-eishockey-fussball-hero.webp",
+    "rawUrl": "https://cdn.jsdelivr.net/gh/andim82/HS-Website@main/dist/hero-images/basketball-american-football-eishockey-fussball-hero.webp",
     "altText": "US Sports Daten & API Coverage – HEIM:SPIEL",
     "title": "US Sports",
     "status": "ok"
@@ -34,7 +34,7 @@
     "oldUrl": "https://drive.google.com/thumbnail?id=12UlgzCi8s1vUyA-zv-WL6cJ9pIb1D4OR&sz=w1536",
     "filename": "basketball-hero.webp",
     "repoPath": "dist/hero-images/basketball-hero.webp",
-    "rawUrl": "https://raw.githubusercontent.com/andim82/HS-Website/main/dist/hero-images/basketball-hero.webp",
+    "rawUrl": "https://cdn.jsdelivr.net/gh/andim82/HS-Website@main/dist/hero-images/basketball-hero.webp",
     "altText": "Basketball Daten & API Coverage – HEIM:SPIEL",
     "title": "Basketball",
     "status": "ok"
@@ -44,7 +44,7 @@
     "oldUrl": "https://drive.google.com/thumbnail?id=1f022ifggy54v8OikTr2qhCqjXGvO7fEN&sz=w1536",
     "filename": "eishockey-hero.webp",
     "repoPath": "dist/hero-images/eishockey-hero.webp",
-    "rawUrl": "https://raw.githubusercontent.com/andim82/HS-Website/main/dist/hero-images/eishockey-hero.webp",
+    "rawUrl": "https://cdn.jsdelivr.net/gh/andim82/HS-Website@main/dist/hero-images/eishockey-hero.webp",
     "altText": "Ice Hockey Daten & API Coverage – HEIM:SPIEL",
     "title": "Ice Hockey",
     "status": "ok"
@@ -54,7 +54,7 @@
     "oldUrl": "https://drive.google.com/thumbnail?id=1S3mlyDEWdrTzaiZik3T7-m31cgfYAjbn&sz=w1536",
     "filename": "american-football-hero.webp",
     "repoPath": "dist/hero-images/american-football-hero.webp",
-    "rawUrl": "https://raw.githubusercontent.com/andim82/HS-Website/main/dist/hero-images/american-football-hero.webp",
+    "rawUrl": "https://cdn.jsdelivr.net/gh/andim82/HS-Website@main/dist/hero-images/american-football-hero.webp",
     "altText": "American Football Daten & API Coverage – HEIM:SPIEL",
     "title": "American Football",
     "status": "ok"
@@ -64,7 +64,7 @@
     "oldUrl": "https://drive.google.com/thumbnail?id=1xftkgN-M-jxPtgEszYtP7I99u-wYbPLU&sz=w1536",
     "filename": "fussball-hero.webp",
     "repoPath": "dist/hero-images/fussball-hero.webp",
-    "rawUrl": "https://raw.githubusercontent.com/andim82/HS-Website/main/dist/hero-images/fussball-hero.webp",
+    "rawUrl": "https://cdn.jsdelivr.net/gh/andim82/HS-Website@main/dist/hero-images/fussball-hero.webp",
     "altText": "football Daten & API Coverage – HEIM:SPIEL",
     "title": "football",
     "status": "ok"
