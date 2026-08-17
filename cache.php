@@ -740,84 +740,115 @@ function hs_build_last_season_stats( array $rows ) {
 /**
  * Saison-Familien-Aggregation (Playoff/Play-In/regulaer werden zusammengezaehlt).
  */
+
 function hs_build_last_season_family_stats( array $rows ) {
-	$now = time();
+$now = time();
 
-	$grouped = [];
-	foreach ( $rows as $row ) {
-		$row = array_change_key_case( $row, CASE_LOWER );
-		$compId = trim( (string) ( $row['competition_id'] ?? '' ) );
-		if ( $compId === '' ) continue;
+// FIX (Task 4): Statt nach dem ersten Wort von season_name zu gruppieren
+// (unzuverlaessig, da Ligen uneinheitliche Namenskonventionen nutzen, z.B.
+// "2024" + "2024 Playoffs" vs. "2024/2025" + "2024 Playoffs" vs.
+// "2020/2021 Playoffs" + "2020"), gruppieren wir jetzt anhand der zeitlichen
+// Naehe des season_end-Datums. Regular Season + Playoffs derselben Saison
+// enden immer nur wenige Wochen/Monate auseinander, waehrend verschiedene
+// Jahres-Saisons ca. 11-12 Monate auseinander liegen.
+$CLUSTER_GAP_SECONDS = 200 * 86400;
 
-		$seasonName    = trim( (string) ( $row['season_name'] ?? '' ) );
-		$seasonEndRaw  = trim( (string) ( $row['season_end'] ?? '' ) );
-		if ( $seasonEndRaw === '' ) continue;
-		$seasonEndTs = strtotime( $seasonEndRaw );
-		if ( $seasonEndTs === false ) continue;
+$grouped = [];
+foreach ( $rows as $row ) {
+$row = array_change_key_case( $row, CASE_LOWER );
+$compId = trim( (string) ( $row['competition_id'] ?? '' ) );
+if ( $compId === '' ) continue;
 
-		$seasonFamily = preg_replace( '/\s+.*$/', '', $seasonName );
-		if ( $seasonFamily === '' ) $seasonFamily = $seasonName;
+$seasonEndRaw = trim( (string) ( $row['season_end'] ?? '' ) );
+if ( $seasonEndRaw === '' ) continue;
+$seasonEndTs = strtotime( $seasonEndRaw );
+if ( $seasonEndTs === false ) continue;
 
-		if ( ! isset( $grouped[ $compId ] ) ) $grouped[ $compId ] = [];
-		if ( ! isset( $grouped[ $compId ][ $seasonFamily ] ) ) $grouped[ $compId ][ $seasonFamily ] = [];
+if ( ! isset( $grouped[ $compId ] ) ) $grouped[ $compId ] = [];
+$grouped[ $compId ][] = [
+'row'         => $row,
+'seasonEndTs' => $seasonEndTs,
+];
+}
 
-		$grouped[ $compId ][ $seasonFamily ][] = [
-			'row'         => $row,
-			'seasonEndTs' => $seasonEndTs,
-		];
-	}
+$result = [];
+foreach ( $grouped as $compId => $entries ) {
+usort( $entries, function( $a, $b ) { return $a['seasonEndTs'] <=> $b['seasonEndTs']; } );
 
-	$result = [];
-	foreach ( $grouped as $compId => $families ) {
-		$bestFamily      = null;
-		$bestFamilyMaxEnd = null;
+// Zeitlich zusammenhaengende Cluster bilden (Luecke > 200 Tage = neue Saison).
+$clusters = [];
+$current  = [];
+$prevEnd  = null;
+foreach ( $entries as $entry ) {
+if ( $prevEnd !== null && ( $entry['seasonEndTs'] - $prevEnd ) > $CLUSTER_GAP_SECONDS ) {
+$clusters[] = $current;
+$current = [];
+}
+$current[] = $entry;
+$prevEnd = $entry['seasonEndTs'];
+}
+if ( ! empty( $current ) ) $clusters[] = $current;
 
-		foreach ( $families as $familyKey => $entries ) {
-			$ends  = array_column( $entries, 'seasonEndTs' );
-			$maxEnd = max( $ends );
-			if ( $maxEnd > $now ) continue;
+// Letzten ABGESCHLOSSENEN Cluster waehlen (max end <= now).
+$bestCluster       = null;
+$bestClusterMaxEnd = null;
+// NEU (Task 5): merken, ob es ueberhaupt einen Cluster mit Saisonende in
+// der Zukunft gibt (= angekuendigte/laufende Saison) -- unabhaengig davon,
+// wie lange die letzte ABGESCHLOSSENE Saison zurueckliegt. Wichtig fuer
+// zyklische Wettbewerbe wie Weltmeisterschaften (alle 4 Jahre).
+$hasFutureCluster  = false;
+foreach ( $clusters as $cluster ) {
+$ends   = array_column( $cluster, 'seasonEndTs' );
+$maxEnd = max( $ends );
+if ( $maxEnd > $now ) {
+$hasFutureCluster = true;
+continue;
+}
 
-			if ( $bestFamilyMaxEnd === null || $maxEnd > $bestFamilyMaxEnd ) {
-				$bestFamilyMaxEnd = $maxEnd;
-				$bestFamily        = $familyKey;
-			}
-		}
+if ( $bestClusterMaxEnd === null || $maxEnd > $bestClusterMaxEnd ) {
+$bestClusterMaxEnd = $maxEnd;
+$bestCluster        = $cluster;
+}
+}
 
-		if ( $bestFamily === null ) continue;
+if ( $bestCluster === null ) continue;
 
-		$matches    = 0;
-		$liveTicker = 0;
-		$liveScores = 0;
-		$statsList  = '';
-		foreach ( $families[ $bestFamily ] as $entry ) {
-			$row      = $entry['row'];
-			$m        = floatval( $row['number_matches'] ?? 0 );
-			$lsFull   = floatval( $row['live_status_full'] ?? 0 );
-			$lsData   = floatval( $row['live_status_data'] ?? 0 );
-			$lsGoals  = floatval( $row['live_status_goals'] ?? 0 );
-			$lsResult = floatval( $row['live_status_result'] ?? 0 );
+$matches    = 0;
+$liveTicker = 0;
+$liveScores = 0;
+$statsList  = '';
+foreach ( $bestCluster as $entry ) {
+$row      = $entry['row'];
+$m        = floatval( $row['number_matches'] ?? 0 );
+$lsFull   = floatval( $row['live_status_full'] ?? 0 );
+$lsData   = floatval( $row['live_status_data'] ?? 0 );
+$lsGoals  = floatval( $row['live_status_goals'] ?? 0 );
+$lsResult = floatval( $row['live_status_result'] ?? 0 );
 
-			$matches    += $m;
-			$liveTicker += $lsFull;
-			$liveScores += ( $lsFull + $lsData + $lsGoals + $lsResult );
+$matches    += $m;
+$liveTicker += $lsFull;
+$liveScores += ( $lsFull + $lsData + $lsGoals + $lsResult );
 
-			if ( $statsList === '' ) {
-				$sl = trim( (string) ( $row['stats_list'] ?? '' ) );
-				if ( $sl !== '' ) $statsList = $sl;
-			}
-		}
+if ( $statsList === '' ) {
+$sl = trim( (string) ( $row['stats_list'] ?? '' ) );
+if ( $sl !== '' ) $statsList = $sl;
+}
+}
 
-		$result[ $compId ] = [
-			'matches'      => (int) $matches,
-			'liveTicker'   => (int) $liveTicker,
-			'liveScores'   => (int) $liveScores,
-			'statsList'    => $statsList,
-			'seasonFamily' => $bestFamily,
-			'seasonEnd'    => date( 'Y-m-d', $bestFamilyMaxEnd ),
-		];
-	}
+$result[ $compId ] = [
+'matches'          => (int) $matches,
+'liveTicker'       => (int) $liveTicker,
+'liveScores'       => (int) $liveScores,
+'statsList'        => $statsList,
+'seasonEnd'        => date( 'Y-m-d', $bestClusterMaxEnd ),
+// NEU (Task 5): Basis fuer den "Wettbewerb ist veraltet"-Check in
+// hs_aggregate_coverage().
+'lastCompletedEnd' => $bestClusterMaxEnd,
+'hasCurrentSeason' => $hasFutureCluster,
+];
+}
 
-	return $result;
+return $result;
 }
 
 /**
@@ -1016,17 +1047,26 @@ function hs_aggregate_coverage( array $rows, array $curated_ids = [] ) {
 	$totalMatches = 0;
 	$compLookup = [];
 
-	$lastSeasonStats = hs_build_last_season_family_stats( $rows );
+$lastSeasonStats = hs_build_last_season_family_stats( $rows );
+$STALE_YEARS_THRESHOLD = 4;
+$staleCutoffTs = strtotime( '-' . $STALE_YEARS_THRESHOLD . ' years' );
+$staleCompIds = [];
+foreach ( $lastSeasonStats as $lsCompId => $lsStats ) {
+if ( empty( $lsStats['hasCurrentSeason'] ) && ! empty( $lsStats['lastCompletedEnd'] ) && $lsStats['lastCompletedEnd'] < $staleCutoffTs ) {
+$staleCompIds[ $lsCompId ] = true;
+}
+}
 
-	$hasCompOrder = array_key_exists( 'competition_order', $sample );
-	$hasAge = array_key_exists( 'age', $sample );
-	$hasGender = array_key_exists( 'gender', $sample );
+$hasCompOrder = array_key_exists( 'competition_order', $sample );
+$hasAge = array_key_exists( 'age', $sample );
+$hasGender = array_key_exists( 'gender', $sample );
 
-	foreach ( $rows as $row ) {
-		$row = array_change_key_case( $row, CASE_LOWER );
+foreach ( $rows as $row ) {
+$row = array_change_key_case( $row, CASE_LOWER );
 
-		$compId = trim( (string) ( $row['competition_id'] ?? '' ) );
-		if ( $compId === '' ) continue;
+$compId = trim( (string) ( $row['competition_id'] ?? '' ) );
+if ( $compId === '' ) continue;
+if ( isset( $staleCompIds[ $compId ] ) ) continue;
 
 		$country = $hasCountry ? trim( (string) ( $row['country'] ?? '' ) ) : '';
 		$fed = $hasFed ? trim( (string) ( $row['federation'] ?? '' ) ) : '';
@@ -1048,9 +1088,13 @@ function hs_aggregate_coverage( array $rows, array $curated_ids = [] ) {
 		$compAge = $hasAge ? trim( (string) ( $row['age'] ?? '' ) ) : '';
 		$compGender = $hasGender ? trim( (string) ( $row['gender'] ?? '' ) ) : '';
 
-		if ( ! isset( $seenCompIds[ $compId ] ) ) {
-			$totalMatches += $matches;
-		}
+// FIX: totalMatches muss die "letzte abgeschlossene Saison"-Zahl nutzen
+// (seasonMatches ueber hs_build_last_season_family_stats), nicht den rohen
+// number_matches-Wert der zufaellig zuerst gesehenen CSV-Zeile -- sonst
+// zaehlt z.B. NFL nur mit einzelnen Playoff-Spielen statt der vollen Saison.
+if ( ! isset( $seenCompIds[ $compId ] ) ) {
+$totalMatches += $lsStatsRow['matches'];
+}
 
 		if ( $country !== '' ) {
 			if ( ! isset( $countries[ $country ] ) ) {
