@@ -1,16 +1,8 @@
 import sharp from "sharp";
 
 const WP_BASE = process.env.WP_BASE_URL || "https://heimspiel.de";
-const WP_USER = process.env.WP_USER;
-const WP_APP_PASSWORD = process.env.WP_APP_PASSWORD;
-
-if (!WP_USER || !WP_APP_PASSWORD) {
-  console.error("WP_USER / WP_APP_PASSWORD fehlen (GitHub Secrets pruefen).");
-  process.exit(1);
-}
-
-const AUTH_HEADER = "Basic " + Buffer.from(`${WP_USER}:${WP_APP_PASSWORD}`).toString("base64");
 const USER_AGENT = "HeimspielPrerenderClient/1.0";
+const OUT_DIR = "dist/hero-images";
 
 function slugify(str) {
   return String(str || "")
@@ -49,30 +41,6 @@ async function toWebp(buf) {
     .toBuffer();
 }
 
-async function uploadToWp(webpBuf, filename, altText, title) {
-  const res = await fetch(`${WP_BASE}/wp-json/hs-cache/v1/prerender/media`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: AUTH_HEADER,
-      "User-Agent": USER_AGENT,
-      Accept: "application/json",
-    },
-    body: JSON.stringify({
-      filename,
-      mime_type: "image/webp",
-      data_base64: webpBuf.toString("base64"),
-      alt_text: altText,
-      title,
-    }),
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(json.code ? `${json.code}: ${json.message}` : (json.error || `Upload HTTP ${res.status}`));
-  }
-  return json; // { id, url }
-}
-
 async function main() {
   const rawIndex = await fetchIndex();
   const rows = rawIndex.map(normalizeRow);
@@ -82,6 +50,13 @@ async function main() {
   );
 
   console.log(`Gefunden: ${clusters.length} Cluster-Zeilen mit heroBgUrl ohne heroBgUrlCached.`);
+
+  const fs = await import("fs");
+  fs.mkdirSync(OUT_DIR, { recursive: true });
+
+  const repo = process.env.GITHUB_REPOSITORY || "andim82/HS-Website";
+  const branch = process.env.GITHUB_REF_NAME || "main";
+  const rawBase = `https://raw.githubusercontent.com/${repo}/${branch}/${OUT_DIR}`;
 
   const results = [];
   for (const row of clusters) {
@@ -94,31 +69,33 @@ async function main() {
       console.log(`→ ${disciplineKey}: lade ${row.herobgurl}`);
       const original = await downloadImage(row.herobgurl);
       const webp = await toWebp(original);
-      const uploaded = await uploadToWp(webp, filename, altText, displayName);
+      fs.writeFileSync(`${OUT_DIR}/${filename}`, webp);
       results.push({
         disciplineKey,
         oldUrl: row.herobgurl,
-        newUrl: uploaded.url,
-        mediaId: uploaded.id,
+        filename,
+        repoPath: `${OUT_DIR}/${filename}`,
+        rawUrl: `${rawBase}/${filename}`,
         altText,
+        title: displayName,
         status: "ok",
       });
-      console.log(`  ✓ hochgeladen: ${uploaded.url}`);
+      console.log(`  ✓ geschrieben: ${OUT_DIR}/${filename}`);
     } catch (err) {
       results.push({ disciplineKey, oldUrl: row.herobgurl, status: "error", error: err.message });
       console.error(`  ✗ Fehler bei ${disciplineKey}: ${err.message}`);
     }
-    await new Promise((r) => setTimeout(r, 500));
+    await new Promise((r) => setTimeout(r, 300));
   }
 
-  const fs = await import("fs");
   fs.mkdirSync("output", { recursive: true });
   fs.writeFileSync("output/image-mapping.json", JSON.stringify(results, null, 2));
+  fs.writeFileSync(`${OUT_DIR}/image-mapping.json`, JSON.stringify(results, null, 2));
 
   const ok = results.filter((r) => r.status === "ok").length;
   const failed = results.length - ok;
   console.log(`\nFertig: ${ok} erfolgreich, ${failed} fehlgeschlagen.`);
-  if (failed > 0) process.exitCode = 1;
+  if (failed > 0 && ok === 0) process.exitCode = 1;
 }
 
 main().catch((err) => {
