@@ -7,7 +7,7 @@ const OUT_DIR = "dist/hero-images";
 function slugify(str) {
   return String(str || "")
     .trim().toLowerCase()
-    .replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue").replace(/ß/g, "ss")
+    .replace(/ä§§/g, "ae").replace(/ö§§§/g, "oe").replace(/ö§§§/g, "ue").replace(/ß§/g, "ss")
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
@@ -48,7 +48,7 @@ async function downloadImage(url) {
 async function toWebp(buf) {
   return sharp(buf)
     .resize({ width: 1920, withoutEnlargement: true })
-    .webp({ quality: 100, lossless: false, effort: 6 })
+    .webp({ quality: 90, lossless: false, effort: 6 })
     .toBuffer();
 }
 
