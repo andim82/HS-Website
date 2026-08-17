@@ -10,6 +10,7 @@ if (!WP_USER || !WP_APP_PASSWORD) {
 }
 
 const AUTH_HEADER = "Basic " + Buffer.from(`${WP_USER}:${WP_APP_PASSWORD}`).toString("base64");
+const USER_AGENT = "HeimspielPrerenderClient/1.0";
 
 function slugify(str) {
   return String(str || "")
@@ -20,7 +21,9 @@ function slugify(str) {
 }
 
 async function fetchIndex() {
-  const res = await fetch(`${WP_BASE}/wp-json/hs-cache/v1/index`);
+  const res = await fetch(`${WP_BASE}/wp-json/hs-cache/v1/index`, {
+    headers: { "User-Agent": USER_AGENT },
+  });
   if (!res.ok) throw new Error(`Index HTTP ${res.status}`);
   const json = await res.json();
   return json.index || json[Object.keys(json)[0]] || [];
@@ -33,7 +36,7 @@ function normalizeRow(row) {
 }
 
 async function downloadImage(url) {
-  const res = await fetch(url);
+  const res = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
   if (!res.ok) throw new Error(`Bild-Download HTTP ${res.status}`);
   const buf = Buffer.from(await res.arrayBuffer());
   return buf;
@@ -52,7 +55,8 @@ async function uploadToWp(webpBuf, filename, altText, title) {
     headers: {
       "Content-Type": "application/json",
       Authorization: AUTH_HEADER,
-      "User-Agent": "HS-Prerender-Bot/1.0 (+github-actions)",
+      "User-Agent": USER_AGENT,
+      Accept: "application/json",
     },
     body: JSON.stringify({
       filename,
@@ -64,9 +68,9 @@ async function uploadToWp(webpBuf, filename, altText, title) {
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(json.code ? `${json.code}: ${json.message}` : `Upload HTTP ${res.status}`);
+    throw new Error(json.code ? `${json.code}: ${json.message}` : (json.error || `Upload HTTP ${res.status}`));
   }
-  return json;
+  return json; // { id, url }
 }
 
 async function main() {
@@ -104,7 +108,6 @@ async function main() {
       results.push({ disciplineKey, oldUrl: row.herobgurl, status: "error", error: err.message });
       console.error(`  ✗ Fehler bei ${disciplineKey}: ${err.message}`);
     }
-    // kleine Pause, um WP/Google Drive nicht zu ueberlasten
     await new Promise((r) => setTimeout(r, 500));
   }
 
