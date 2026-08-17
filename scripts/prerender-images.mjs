@@ -12,6 +12,19 @@ function slugify(str) {
     .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
+// Google Drive's /thumbnail-Endpunkt liefert eine von Google bereits stark
+// komprimierte, auf max. sz=w1536 herunterskalierte Vorschau -- NICHT die
+// Originaldatei. Das erklaerte die schlechte Bildqualitaet trotz hoher
+// WebP-Qualitaetseinstellung: das Ausgangsmaterial war schon detailarm.
+// Diese Funktion extrahiert die Datei-ID und baut die Direct-Download-URL,
+// die die Originaldatei unveraendert ausliefert.
+function toDriveDirectDownloadUrl(url) {
+  const match = String(url || "").match(/[?&]id=([a-zA-Z0-9_-]+)/) || String(url || "").match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (!match) return url;
+  const id = match[1];
+  return `https://drive.google.com/uc?export=download&id=${id}`;
+}
+
 async function fetchIndex() {
   const res = await fetch(`${WP_BASE}/wp-json/hs-cache/v1/index`, {
     headers: { "User-Agent": USER_AGENT },
@@ -28,9 +41,13 @@ function normalizeRow(row) {
 }
 
 async function downloadImage(url) {
-  const res = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
+  const res = await fetch(url, { headers: { "User-Agent": USER_AGENT }, redirect: "follow" });
   if (!res.ok) throw new Error(`Bild-Download HTTP ${res.status}`);
+  const contentType = res.headers.get("content-type") || "";
   const buf = Buffer.from(await res.arrayBuffer());
+  if (contentType.includes("text/html")) {
+    throw new Error("Google Drive lieferte eine HTML-Seite statt Bilddaten (z.B. Freigabe-/Virenscan-Warnseite) statt der Datei.");
+  }
   return buf;
 }
 
@@ -60,20 +77,15 @@ async function main() {
 
   const results = [];
   for (const row of clusters) {
-    // FIX: Sheet-Spalte heisst "discipline_key" (mit Unterstrich), aber
-    // normalizeRow() entfernt Unterstriche nicht -- nur row.disciplinekey
-    // (ohne Unterstrich) wurde bisher geprueft, war daher IMMER undefined,
-    // wodurch der bundlename-Fallback bei JEDER Zeile griff (bei den
-    // meisten Sportarten zufaellig unauffaellig, bei "US Sports" mit
-    // langem Mitglieder-bundleName sichtbar falsch).
     const disciplineKey = row.discipline_key || row.disciplinekey || slugify(row.bundlename);
     const displayName = row.displayname || row.bundlename || disciplineKey;
     const altText = `${displayName} Daten & API Coverage – HEIM:SPIEL`.substring(0, 120);
     const filename = `${slugify(disciplineKey)}-hero.webp`;
+    const directUrl = toDriveDirectDownloadUrl(row.herobgurl);
 
     try {
-      console.log(`→ ${disciplineKey}: lade ${row.herobgurl}`);
-      const original = await downloadImage(row.herobgurl);
+      console.log(`→ ${disciplineKey}: lade ${directUrl}`);
+      const original = await downloadImage(directUrl);
       const webp = await toWebp(original);
       fs.writeFileSync(`${OUT_DIR}/${filename}`, webp);
       results.push({
@@ -86,7 +98,7 @@ async function main() {
         title: displayName,
         status: "ok",
       });
-      console.log(`  ✓ geschrieben: ${OUT_DIR}/${filename}`);
+      console.log(`  ✓ geschrieben: ${OUT_DIR}/${filename} (${(webp.length / 1024).toFixed(1)} KB)`);
     } catch (err) {
       results.push({ disciplineKey, oldUrl: row.herobgurl, status: "error", error: err.message });
       console.error(`  ✗ Fehler bei ${disciplineKey}: ${err.message}`);
