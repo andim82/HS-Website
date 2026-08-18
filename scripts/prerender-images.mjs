@@ -7,7 +7,7 @@ const OUT_DIR = "dist/hero-images";
 function slugify(str) {
   return String(str || "")
     .trim().toLowerCase()
-    .replace(/ä§§/g, "ae").replace(/ö§§§/g, "oe").replace(/ö§§§/g, "ue").replace(/ß§/g, "ss")
+    .replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue").replace(/ß/g, "ss")
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
@@ -56,11 +56,14 @@ async function main() {
   const rawIndex = await fetchIndex();
   const rows = rawIndex.map(normalizeRow);
 
-  const clusters = rows.filter(
-    (r) => (r.type || "").toLowerCase() === "cluster" && r.herobgurl && !r.herobgurlcached
+  // FIX: vorher nur type === "cluster" -- Detail-Zeilen (z.B. Biathlon,
+  // Ski Alpin) mit eigener heroBgUrl wurden dadurch komplett ignoriert.
+  const ROW_TYPES = ["cluster", "detail"];
+  const rowsWithHero = rows.filter(
+    (r) => ROW_TYPES.includes((r.type || "").toLowerCase()) && r.herobgurl && !r.herobgurlcached
   );
 
-  console.log(`Gefunden: ${clusters.length} Cluster-Zeilen mit heroBgUrl ohne heroBgUrlCached.`);
+  console.log(`Gefunden: ${rowsWithHero.length} Zeilen (cluster+detail) mit heroBgUrl ohne heroBgUrlCached.`);
 
   const fs = await import("fs");
   fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -70,7 +73,7 @@ async function main() {
   const rawBase = `https://raw.githubusercontent.com/${repo}/${branch}/${OUT_DIR}`;
 
   const results = [];
-  for (const row of clusters) {
+  for (const row of rowsWithHero) {
     const disciplineKey = row.discipline_key || row.disciplinekey || slugify(row.bundlename);
     const displayName = row.displayname || row.bundlename || disciplineKey;
     const altText = `${displayName} Daten & API Coverage – HEIM:SPIEL`.substring(0, 120);
