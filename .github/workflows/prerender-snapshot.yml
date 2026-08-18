@@ -1,0 +1,44 @@
+name: Prerender - Snapshot Pages to WordPress
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 6 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run snapshot-pages.mjs (Puppeteer)
+        run: node scripts/snapshot-pages.mjs
+        env:
+          WP_BASE_URL: https://heimspiel.de
+
+      - name: Run push-snapshots.mjs (Writeback)
+        run: node scripts/push-snapshots.mjs
+        env:
+          WP_BASE_URL: https://heimspiel.de
+          HS_SNAPSHOT_API_KEY: ${{ secrets.HS_SNAPSHOT_API_KEY }}
+
+      - name: Upload snapshot + push reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-reports
+          path: |
+            output/snapshot-mapping.json
+            output/push-report.json
