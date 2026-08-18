@@ -54,7 +54,12 @@ async function buildUrlList() {
     for (const row of rows) {
       const type = (row.type || "").toLowerCase();
       if (type !== "cluster" && type !== "detail") continue;
-      const rawPath = row.detailurl || row.url || row.clusterurl;
+      // FIX: Index-Sheet liefert das Feld als "detail_url" (mit Unterstrich).
+      // normalizeRow() lowercased Keys, entfernt aber keine Unterstriche,
+      // daher muss detail_url hier zusaetzlich zu den frueheren Varianten
+      // (detailurl/url/clusterurl) geprueft werden -- sonst bleibt rawPath
+      // fuer JEDE Zeile undefined und buildUrlList() liefert 0 URLs.
+      const rawPath = row.detail_url || row.detailurl || row.url || row.clusterurl;
       const fullUrl = resolveUrl(rawPath, isDE);
       if (!fullUrl || seen.has(fullUrl)) continue;
       seen.add(fullUrl);
