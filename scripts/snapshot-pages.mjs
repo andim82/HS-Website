@@ -78,7 +78,7 @@ async function snapshotPage(browser, entry) {
   page.setDefaultNavigationTimeout(NAV_TIMEOUT_MS);
   await page.setUserAgent(USER_AGENT);
 
-  const result = { ...entry, status: "error", error: null, html: null, renderComplete: false };
+  const result = { ...entry, status: "error", error: null, html: null, rootInnerHtml: null, renderComplete: false };
 
   try {
     await page.goto(entry.url, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
@@ -99,9 +99,16 @@ async function snapshotPage(browser, entry) {
     await new Promise((r) => setTimeout(r, 500));
 
     const html = await page.content();
+    const rootInnerHtml = await page.evaluate(() => {
+      const el = document.getElementById("hs-root");
+      return el ? el.innerHTML : null;
+    });
+
     result.html = html;
+    result.rootInnerHtml = rootInnerHtml;
     result.renderComplete = renderComplete;
-    result.status = renderComplete ? "ok" : "ok_timeout";
+    result.status = rootInnerHtml ? (renderComplete ? "ok" : "ok_timeout") : "error";
+    if (!rootInnerHtml) result.error = "#hs-root nicht gefunden oder leer";
   } catch (err) {
     result.error = err.message;
     result.status = "error";
