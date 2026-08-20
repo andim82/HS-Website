@@ -15,6 +15,12 @@
 (function () {
   "use strict";
 
+window.hsRenderComplete = false;
+function hsMarkRenderComplete() {
+  window.hsRenderComplete = true;
+  document.body.setAttribute("data-hs-rendered", "true");
+}
+
   const CONFIG = {
     // WordPress Cache-Endpunkte (heimspiel-data-cache Plugin)
     // Daten kommen vom WP-Server statt direkt von Sheety/Google
@@ -476,20 +482,20 @@ const totalEvents = disciplineData.reduce((s, d) => s + d.total_events, 0);
       .map(function(s){ return s.trim(); })
       .filter(Boolean)
       .length > 0;
-    const validTopCompetitions = hasConfiguredTopCompetitions && coverageData && Array.isArray(coverageData.topCompetitions)
-      ? coverageData.topCompetitions.filter(function(c) {
-          if (!c) return false;
-          var hasRealTarget = !!(
-            (c.competition_id && String(c.competition_id).trim() !== "") ||
-            (c.detail_url && String(c.detail_url).trim() !== "")
-          );
-          var hasRealLabel = !!(
-            (c.label && String(c.label).trim() !== "") ||
-            (c.competition_name && String(c.competition_name).trim() !== "")
-          );
-          return hasRealTarget && hasRealLabel;
-        })
-      : [];
+const validTopCompetitions = hasConfiguredTopCompetitions && coverageData && Array.isArray(coverageData.topCompetitions)
+  ? coverageData.topCompetitions.filter(function(c) {
+      if (!c) return false;
+      var hasRealTarget = !!(
+        (c.competition_id && String(c.competition_id).trim() !== "") ||
+        (c.detail_url && String(c.detail_url).trim() !== "")
+      );
+      var hasRealLabel = !!(
+        (c.label && String(c.label).trim() !== "") ||
+        (c.competition_name && String(c.competition_name).trim() !== "")
+      );
+      return hasRealTarget && hasRealLabel;
+    })
+  : [];
 
    const hasTopCompetitions = hasConfiguredTopCompetitions && validTopCompetitions.length > 0;
 
@@ -585,9 +591,8 @@ renderSubTextSeparator(b, g) +
 	sportEyebrow: f(b, "sportEyebrow", ""),
         totalCompetitions: useCoverageMode ? ((coverageData && coverageData.totalCompetitions) || "") : disciplineData.length,
         totalCountries: useCoverageMode ? ((coverageData && coverageData.totalCountries) || "") : "",
-        livetickCount: isBundleTemplate ? ((bundleTotals && bundleTotals.livetickCount) || "") : (useCoverageMode ? ((coverageData && coverageData.totalLiveTicker) || 0) : totalLive),
-liveCompetitions: isBundleTemplate ? ((bundleTotals && bundleTotals.liveCompetitions) || "") : (useCoverageMode ? (f(b, "liveCompetitions", "") || 0) : totalEvents),
-livetickCount: isBundleTemplate ? ((bundleTotals && bundleTotals.livetickCount) || "") : (useCoverageMode ? (f(b, "livetickCount", "") || 0) : totalLive),
+        livetickCount: isBundleTemplate ? ((bundleTotals && bundleTotals.livetickCount) || "") : (useCoverageMode ? ((f(b, "livetickCount", "") || (coverageData && coverageData.totalLiveTicker)) || 0) : totalLive),
+        liveCompetitions: isBundleTemplate ? ((bundleTotals && bundleTotals.liveCompetitions) || "") : (useCoverageMode ? (f(b, "liveCompetitions", "") || 0) : totalEvents),
         topLeagueNamesList: useCoverageMode ? buildTopLeagueNamesList(validTopCompetitions) : "",
         preEvent: formatEnumeration(f(b, "preEvent", "")),
         live: formatEnumeration(f(b, "live", "")),
@@ -758,23 +763,24 @@ livetickCount: isBundleTemplate ? ((bundleTotals && bundleTotals.livetickCount) 
       keywords:    f(b, "displayName", bundleName) + " data, sports data API, live scores, statistics, HEIM:SPIEL",
       url:         window.location.href,
       image:       f(b, "heroBgUrl", ""),
-      faqItems:    whyFaqItems
+      faqItems:    buildWhyFaqItems(g, seoVars)
     };
     injectSEO(seoOpts);
 
     // Auto-Übersetzung der Competition-Namen (fire-and-forget, nur wenn pageLang != "de")
-    if (useCoverageMode && hasTopCompetitions) {
-      var compNames = [];
-      validTopCompetitions.forEach(function(c) {
-        if (c && c.competition_name) compNames.push(c.competition_name);
-      });
-      if (compNames.length) {
-        translateCompetitions(compNames, pageLang, normalizedBundleKey).then(function(translations) {
-          finalizeCompetitionTranslations(translations, root, validTopCompetitions, seoVars, g, seoOpts);
-        });
-      }
-    }
+var hsTranslationPromise = Promise.resolve(null);
+if (useCoverageMode && hasTopCompetitions) {
+  var compNames = [];
+  validTopCompetitions.forEach(function(c){ if(c) compNames.push(c.competition_name); });
+  if (compNames.length) {
+    hsTranslationPromise = translateCompetitions(compNames, pageLang, normalizedBundleKey).then(function(translations){
+      finalizeCompetitionTranslations(translations, root, validTopCompetitions, seoVars, g, seoOpts);
+    });
   }
+}
+hsTranslationPromise.finally(hsMarkRenderComplete);
+
+}
 
   // ── Detail render ─────────────────────────────────────────────────────────
 
@@ -881,16 +887,25 @@ const liveCompetitions = parseInt(disc.livecompetitions) || 0;
       track.addEventListener('scroll', checkEnd, {passive:true});
       checkEnd();
     })();
-    // Auto-Übersetzung (fire-and-forget, nur wenn pageLanguage != "de")
-    var pageLang = (disc.pagelanguage || document.documentElement.lang || "de").trim();
-    translateEvents(events, pageLang, disciplineKey).then(function(translations) {
-      applyEventTranslations(translations, root);
-    });
-    // General Index: Text-Injection in WP-Blöcke + Integration/MidCTA
-    // generalIndex already loaded — g available from parameter
-    (function() {
-      var r = root;
-      var d = document;
+
+// Auto-Übersetzung, nur wenn pageLanguage != "de" -- render-complete-Flag
+// wird erst NACH Abschluss der Übersetzung gesetzt (oder sofort bei "de").
+var pageLang = (disc.pagelanguage || document.documentElement.lang || "de").trim();
+translateEvents(events, pageLang, disciplineKey).then(function(translations) {
+  applyEventTranslations(translations, root);
+}).finally(hsMarkRenderComplete);
+
+// General Index Text-Injection in WP-Blöcke
+// generalIndex already loaded — g available from parameter
+
+// Diese Variablen müssen im Scope von renderDetail() liegen,
+// nicht nur in der nachfolgenden IIFE.
+var seoVars;
+var whyFaqItems;
+
+(function() {
+  var r = root;
+  var d = document;
       setTxt(r.querySelector(".hs-int-headline"), g.integrationsectionheadline);
       var cards = r.querySelectorAll(".hs-int-card");
       ["Api","Widget","Datacenter"].forEach(function(k, i) {
@@ -960,7 +975,7 @@ setTxt(item.querySelector('.faq-desc'), fillPlaceholders(g['faq' + si + 'text'],
       function slotTxt(sel, val) { if (val) { var el = d.querySelector(sel); if (el) el.textContent = val; } }
 
       // ── SEO-FAQ Variablen (Detail) ──────────────────────────────────────
-      var seoVars = {
+     seoVars = {
         sportartName: f(disc, "displayName", disc.name),
 		displayName: f(disc, "displayName", disc.name),
 		sportEyebrow: f(disc, "sportEyebrow", ""), 
@@ -973,7 +988,7 @@ setTxt(item.querySelector('.faq-desc'), fillPlaceholders(g['faq' + si + 'text'],
         live: formatEnumeration(f(disc, "live", "")),
         postEvent: formatEnumeration(f(disc, "postEvent", ""))
       };
-      var whyFaqItems = buildWhyFaqItems(g, seoVars);
+      whyFaqItems = buildWhyFaqItems(g, seoVars);
 
       // ── Build all general slots at once (avoids outerHTML DOM-detachment) ──
       var slotsMap = {};
@@ -1122,7 +1137,7 @@ setTxt(item.querySelector('.faq-desc'), fillPlaceholders(g['faq' + si + 'text'],
       keywords:    dispName + " data API, " + dispName + " live scores, " + dispName + " statistics, sports data",
       url:         window.location.href,
       image:       f(disc, "heroBgUrl", ""),
-      faqItems:    whyFaqItems
+      faqItems: whyFaqItems
     });
   }
 
@@ -1683,15 +1698,15 @@ items.push({
     });
   }
 
-  function finalizeCompetitionTranslations(translations, root, validTopCompetitions, seoVars, g, seoOpts) {
-    applyCompetitionTranslations(translations, root);
-    if (!translations) return;
+function finalizeCompetitionTranslations(translations, root, validTopCompetitions, seoVars, g, seoOpts) {
+  applyCompetitionTranslations(translations, root);
+  if (!translations) return;
 
-    validTopCompetitions.forEach(function(c) {
-      if (c && c.competition_name && translations[c.competition_name]) {
-        c.competition_name = translations[c.competition_name];
-      }
-    });
+  validTopCompetitions.forEach(function(c) {
+    if (c && c.competition_name && translations[c.competition_name]) {
+      c.competition_name = translations[c.competition_name];
+    }
+  });
 
     seoVars.topLeagueNamesList = buildTopLeagueNamesList(validTopCompetitions);
     var updatedFaqItems = buildWhyFaqItems(g, seoVars);
@@ -1721,7 +1736,7 @@ items.push({
     const desc     = f(b, "description", "Alle Daten auf einen Blick \u2013 bereit zur Integration");
     const ctaUrl   = (g.ctaurl || "#contact");
     const ctaTxt   = (g.ctatext || "Jetzt anfragen");
-    const bgUrl    = f(b, "heroBgUrl",   "");
+    const bgUrl    = f(b, "heroBgUrlCached", "") || f(b, "heroBgUrl", "");
 
     const bgContent = bgUrl
       ? '<img src="' + bgUrl + '" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 75%;">'
@@ -1752,7 +1767,7 @@ items.push({
     const desc    = f(disc, "description", "Vollst\u00e4ndige Berichterstattung \u2013 Events, Stats & Liveticker");
     const ctaUrl  = (g.ctaurl || "#contact");
     const ctaTxt  = (g.ctatext || "Jetzt anfragen");
-    const bgUrl   = f(disc, "heroBgUrl",   "");
+    const bgUrl   = f(disc, "heroBgUrlCached", "") || f(disc, "heroBgUrl", "");
 
     const bgContent = bgUrl
       ? '<img src="' + bgUrl + '" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 75%;">'
