@@ -532,8 +532,8 @@ root.innerHTML = renderHeroCluster(bundleName, b, g) + renderStatsBar(statBarVal
     (useCoverageMode && hasTopCompetitions ? renderTopCompetitionsCards(validTopCompetitions, b, g, normalizedBundleKey, sportKeyToDisplayName, showSportPill) : "") +
     (useCoverageMode ? renderCoverageCards(coverageData, b, g, normalizedBundleKey, !hasTopCompetitions) : renderClusterCards(disciplineData, b, g))
 ) +
-renderSubTextSeparator(b, g) +
-  renderCoverageSection(b, g) +
+renderCoverageSection(b, g) +
+  renderSubTextSeparator(b, g) +
   renderRelatedServices(b, index, g) +
   renderIntegrationSection(b) +
   renderMidCTA(b) +
@@ -1501,7 +1501,7 @@ items.push({
       return '<div class="hs-cov-card fade-in">' +
         '<div class="hs-cov-head">' +
           '<div class="hs-cov-icon">' + cardSVG(svgType) + '</div>' +
-          '<span class="hs-cov-name">' + label + '</span>' +
+          '<h3 class="hs-cov-name">' + label + '</h3>' +
         '</div>' +
         '<div class="hs-cov-body"><ul class="hs-cov-list">' +
           items.map(function(t) { return '<li>' + t + '</li>'; }).join('') +
@@ -1533,14 +1533,25 @@ items.push({
         '</div>'
       : '';
 
-    return subTextHtml +
-    '<section class="hs-coverage-section hs-detail-coverage">' +
+        // NEU (SEO Paket 1): H2 ueber die Karten, Erklaerungstext (subText)
+    // darunter statt darueber.
+    var dpTitle = fillPlaceholders(
+      (g.datapointstitle || 'Welche {displayName}-Daten liefert HEIM:SPIEL?'),
+      disc
+    );
+
+    return '<section class="hs-coverage-section hs-detail-coverage">' +
       '<div class="hs-container">' +
+        (dpTitle
+          ? '<h2 class="hs-section-title">' + dpTitle + '</h2>' +
+            '<span class="hs-section-bar"></span>'
+          : '') +
         '<div class="hs-cov-grid" style="grid-template-columns:repeat(' + colCount + ',1fr)">' +
           cards.join('') +
         '</div>' +
       '</div>' +
-    '</section>';
+    '</section>' +
+    subTextHtml;
   }
 
 
@@ -1941,6 +1952,31 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
     // auf volle Grid-Breite aus und zeigen ALLE untergeordneten Wettbewerbe
     // dieses Landes/dieser Foederation als Liste (im Unterschied zu den
     // Top-Competition-Kacheln, die genau EINEN Wettbewerb zeigen).
+        // NEU (SEO Paket 1): Ersetzt die auf allen Kacheln identische Beschriftung
+    // ("Details anzeigen" -- 109x auf einer Seite und damit rund 17 % des
+    // gesamten Seitentexts) durch die kuratierten Leitwettbewerbe der Gruppe.
+    // Namen und Kuratierungsgrenze liegen bereits in der Coverage-Antwort
+    // (topCompetitions / topCompetitionsCount) -- kein neues Sheet-Feld.
+    //
+    // Doppelte Basisnamen werden fuer die Vorschau uebersprungen, damit nicht
+    // "Bundesliga, Bundesliga (F)" dasteht -- im aufgeklappten Panel bleiben
+    // beide Eintraege unveraendert erhalten.
+    function competitionPreview(group, fallbackLabel) {
+      var comps = (group && group.topCompetitions) ? group.topCompetitions : [];
+      var names = [];
+      var seen  = {};
+      for (var ci = 0; ci < comps.length && names.length < 2; ci++) {
+        var base = String((comps[ci] && comps[ci].name) || "").trim();
+        if (!base) continue;
+        var key = base.toLowerCase();
+        if (seen[key]) continue;
+        seen[key] = true;
+        names.push(base + buildCompetitionSuffix(comps[ci]));
+      }
+      if (!names.length) return fallbackLabel;
+      return names.join(", ") + (comps.length > names.length ? " \u2026" : "");
+    }
+
     function buildCountryCard(c) {
       var panelId = "hs-cc-panel-" + bundleKey + "-" + (panelIdxCounter++);
       window.hsCompetitionPanelData[panelId] = { competitions: c.topCompetitions || [], groupLabel: c._displayName, topCount: c.topCompetitionsCount || 0 };
@@ -1950,7 +1986,7 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
             'aria-expanded="false" aria-controls="' + panelId + '" ' +
             'onclick="window.hsToggleCompetitionPanel(this, \'' + panelId + '\')">' +
             '<div class="hs-card-head">' + flagIconHtml(c.country_iso, c._displayName) + '<span class="hs-card-sport">' + c._displayName + '</span></div>' +
-            '<div class="hs-card-footer"><div class="hs-card-footer-count">' + c.competitions + ' ' + eventsLabel + '</div><div class="hs-card-footer-link">' + detailsLabel + ' <span class="hs-arrow hs-tc-arrow">\u2192</span></div></div>' +
+            '<div class="hs-card-footer"><div class="hs-card-footer-count">' + c.competitions + ' ' + eventsLabel + '</div><div class="hs-card-footer-link"><span class="hs-card-footer-names">' + competitionPreview(c, detailsLabel) + '</span> <span class="hs-arrow hs-tc-arrow">\u2192</span></div></div>' +
           '</button>' +
           '<div class="hs-tc-panel" id="' + panelId + '" hidden></div>' +
         '</div>'
@@ -1965,7 +2001,7 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
             'aria-expanded="false" aria-controls="' + panelId + '" ' +
             'onclick="window.hsToggleCompetitionPanel(this, \'' + panelId + '\')">' +
             '<div class="hs-card-head"><span class="hs-card-sport">' + i.federation + '</span></div>' +
-            '<div class="hs-card-footer"><div class="hs-card-footer-count">' + i.competitions + ' ' + eventsLabel + '</div><div class="hs-card-footer-link">' + detailsLabel + ' <span class="hs-arrow hs-tc-arrow">\u2192</span></div></div>' +
+            '<div class="hs-card-footer"><div class="hs-card-footer-count">' + i.competitions + ' ' + eventsLabel + '</div><div class="hs-card-footer-link"><span class="hs-card-footer-names">' + competitionPreview(i, detailsLabel) + '</span> <span class="hs-arrow hs-tc-arrow">\u2192</span></div></div>' +
           '</button>' +
           '<div class="hs-tc-panel" id="' + panelId + '" hidden></div>' +
         '</div>'
@@ -2420,7 +2456,7 @@ function renderClusterCards(disciplines, b, g) {
       return '<div class="hs-cov-card fade-in">' +
         '<div class="hs-cov-head">' +
           '<div class="hs-cov-icon">' + cardSVG(svgType) + '</div>' +
-          '<span class="hs-cov-name">' + label + '</span>' +
+          '<h3 class="hs-cov-name">' + label + '</h3>' +
         '</div>' +
         '<div class="hs-cov-body"><ul class="hs-cov-list">' +
           items.map(function(t) { return '<li>' + t + '</li>'; }).join("") +
@@ -2430,8 +2466,25 @@ function renderClusterCards(disciplines, b, g) {
 
     const filledCount = [preItems, liveItems, postItems, imgItems].filter(function(a) { return a.length > 0; }).length;
 
+        // NEU (SEO Paket 1): H2 ueber den Datenpunkt-Karten. Der Block hatte bisher
+    // ueberhaupt keine Ueberschrift und lieferte damit kein
+    // Ueberschriftensignal, obwohl er der inhaltlich wertvollste Teil der Seite
+    // ist -- er enthaelt die sportartspezifischen Datenbegriffe aus den
+    // Sheet-Feldern preEvent/live/postEvent/imageLibrary.
+    //
+    // Quelle ist das General-Index-Feld dataPointsTitle. {displayName} loest
+    // fillPlaceholders() sprachabhaengig aus der Index-Zeile auf.
+    const dpTitle = fillPlaceholders(
+      (g.datapointstitle || "Welche {displayName}-Daten liefert HEIM:SPIEL?"),
+      b
+    );
+
     return '<section class="hs-coverage-section">' +
       '<div class="hs-container">' +
+        (dpTitle
+          ? '<h2 class="hs-section-title">' + dpTitle + '</h2>' +
+            '<span class="hs-section-bar"></span>'
+          : "") +
         '<div class="hs-cov-grid" style="grid-template-columns:repeat(' + filledCount + ',1fr);">' +
           buildCard((g.labelpreevent || "Pre-Event"),      preItems,  "pre")  +
           buildCard((g.labellive || "Live"),           liveItems, "live") +
@@ -2796,7 +2849,7 @@ function renderClusterCards(disciplines, b, g) {
 ".hs-card-compact .hs-card-sport{font-size:.82rem;line-height:1.3;}",
 ".hs-card-compact .hs-card-footer{padding:.55rem 1rem;font-size:.72rem;flex-direction:column;align-items:flex-start;gap:.2rem;}",
 ".hs-card-footer-count{font-weight:700;color:#374151;}",
-".hs-card-footer-link{font-weight:700;color:#e75519;display:flex;align-items:center;gap:.3rem;}",
+".hs-card-footer-link{font-weight:700;color:#e75519;display:flex;align-items:center;gap:.3rem;min-width:0;}",
 ".hs-cards-grid-compact{grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.85rem;}",
 ".hs-cards-section-compact{padding-top:0;padding-bottom:24px;margin-top:0;background:#f8f9fb;display:flow-root;}",
       ".hs-coverage-top{font-size:1.1rem;font-weight:900;color:#061d3e;margin:0 0 1rem;text-align:left;}",
@@ -2804,7 +2857,7 @@ function renderClusterCards(disciplines, b, g) {
       ".hs-coverage-intro{padding-top:40px;padding-bottom:8px;}",
       ".hs-coverage-intro .hs-section-bar{margin-bottom:0;}",
 ".hs-cards-section-compact .hs-section-title{font-size:clamp(1.3rem,2.2vw,1.9rem);}",
-      ".hs-subtext-bar{padding:2rem 0 0;background:#f8f9fb;}",
+      ".hs-subtext-bar{padding:0 0 5rem;background:#f8f9fb;}",
       ".hs-subtext{font-size:.9rem;color:#6b7280;line-height:1.7;max-width:860px;margin:0 auto;text-align:center;}",
       ".hs-coverage-section{padding:40px 0 80px;background:#f8f9fb;}",
       ".hs-cov-grid{display:grid;gap:1.125rem;}",
@@ -2815,7 +2868,8 @@ function renderClusterCards(disciplines, b, g) {
       ".hs-cov-head{background:#061d3e;color:#fff;padding:.9rem 1.1rem;display:flex;align-items:center;gap:.7rem;flex-shrink:0;}",
       ".hs-cov-icon{width:30px;height:30px;border-radius:6px;background:rgba(231,85,25,0.2);display:flex;align-items:center;justify-content:center;flex-shrink:0;}",
       ".hs-cov-icon svg{width:16px;height:16px;stroke:#e75519;}",
-      ".hs-cov-name{font-size:.875rem;font-weight:900;}",
+      ".hs-cov-name{font-size:.875rem;font-weight:900;margin:0;color:inherit;}",
+      ".hs-card-footer-names{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
       ".hs-cov-body{padding:.85rem 1.1rem;background:#f8f9fb;flex:1;}",
       ".hs-cov-list{list-style:none;padding:0;margin:0;}",
       ".hs-cov-list li{font-size:.825rem;color:#6b7280;padding:.14rem 0;display:flex;align-items:flex-start;gap:.5rem;}",
