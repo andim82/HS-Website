@@ -560,6 +560,7 @@ renderSubTextSeparator(b, g) +
   "";
     initAnimations();
     initFullWidthSections();
+    setTimeout(function(){ hsFitCompetitionTitles(root); }, 300);
     // General Index: nur Texte in bestehende DOM-Elemente injizieren
     // generalIndex already loaded — g available from parameter
     var seoVars, whyFaqItems;    (function() {
@@ -589,6 +590,7 @@ renderSubTextSeparator(b, g) +
         sportartName: f(b, "displayName", bundleName),
         displayName: f(b, "displayName", bundleName),
 	sportEyebrow: f(b, "sportEyebrow", ""),
+	heroHeadline: f(b, "heroHeadline", bundleName),
         totalCompetitions: useCoverageMode ? ((coverageData && coverageData.totalCompetitions) || "") : disciplineData.length,
         totalCountries: useCoverageMode ? ((coverageData && coverageData.totalCountries) || "") : "",
         livetickCount: isBundleTemplate ? ((bundleTotals && bundleTotals.livetickCount) || "") : (useCoverageMode ? ((f(b, "livetickCount", "") || (coverageData && coverageData.totalLiveTicker)) || 0) : totalLive),
@@ -875,6 +877,8 @@ const liveCompetitions = parseInt(disc.livecompetitions) || 0;
     initAnimations();
     initFullWidthSections();
     setTimeout(function(){ if(window.hsInitStatsOverflow) window.hsInitStatsOverflow(); }, 300);
+    setTimeout(function(){ hsFitCompetitionTitles(root); }, 300);
+
     // Related Services swipe indicator
     (function(){
       var track = root.querySelector('.hs-rel-track');
@@ -978,7 +982,8 @@ setTxt(item.querySelector('.faq-desc'), fillPlaceholders(g['faq' + si + 'text'],
      seoVars = {
         sportartName: f(disc, "displayName", disc.name),
 		displayName: f(disc, "displayName", disc.name),
-		sportEyebrow: f(disc, "sportEyebrow", ""), 
+		sportEyebrow: f(disc, "sportEyebrow", ""),
+		heroHeadline: f(disc, "heroHeadline", f(disc, "displayName", disc.name)), 
         totalCompetitions: totalEvents,
         totalCountries: "",
         livetickCount: livetickCount,
@@ -1138,6 +1143,81 @@ setTxt(item.querySelector('.faq-desc'), fillPlaceholders(g['faq' + si + 'text'],
       url:         window.location.href,
       image:       f(disc, "heroBgUrl", ""),
       faqItems: whyFaqItems
+    });
+  }
+
+  // ── Auto-Shrink Competition-Card-Titel ───────────────────────────────────
+  // Verhindert, dass lange Wettbewerbsnamen (z.B. "Germany - DFB-Pokal
+  // (Female)") die Kartenhoehe der Top-Competitions-/Coverage-Kacheln
+  // sprengen. Erzwingt eine einheitliche 2-zeilige Kopf-Hoehe per Inline-
+  // Style und verkleinert die Schrift schrittweise, bis der Text passt.
+    function hsFitCompetitionTitles(root) {
+    root = root || document;
+    var MIN_SIZE = 0.62;
+    var START_SIZE = 0.82;
+    var STEP = 0.02;
+    var LINE_HEIGHT = 1.35;
+    var heads = root.querySelectorAll('.hs-card-compact .hs-card-head');
+    if (!heads.length) return;
+
+    heads.forEach(function (head) {
+      var span = head.querySelector('.hs-card-sport');
+      if (!span) return;
+
+      // Erzwingt Flagge + Text NEBENEINANDER -- auch mobil. Verhindert,
+      // dass eine bestehende Media-Query .hs-card-head auf column-Stapel
+      // umschaltet (Flagge ueber dem Text statt daneben), was bei
+      // 2-zeiligem Text die Gesamthoehe unnoetig aufblaeht.
+      head.style.setProperty('display', 'flex', 'important');
+      head.style.setProperty('flex-direction', 'row', 'important');
+      head.style.setProperty('flex-wrap', 'nowrap', 'important');
+      head.style.setProperty('align-items', 'center', 'important');
+
+      // Text-Span muss den verbleibenden Platz neben der Flagge fuellen,
+      // statt in eine neue Zeile/Spalte auszubrechen.
+      span.style.setProperty('flex', '1 1 auto', 'important');
+      span.style.setProperty('min-width', '0', 'important');
+
+      span.style.setProperty('white-space', 'normal', 'important');
+      span.style.setProperty('text-overflow', 'unset', 'important');
+      span.style.setProperty('line-height', String(LINE_HEIGHT), 'important');
+      span.style.setProperty('display', 'block', 'important');
+      span.style.setProperty('overflow', 'visible', 'important');
+      span.style.removeProperty('-webkit-line-clamp');
+      span.style.removeProperty('-webkit-box-orient');
+
+      var size = START_SIZE;
+      span.style.setProperty('font-size', size + 'em', 'important');
+
+      function twoLineTargetPx() {
+        var fontPx = parseFloat(getComputedStyle(span).fontSize);
+        return fontPx * LINE_HEIGHT * 2;
+      }
+
+      var attempts = 0;
+      while (span.scrollHeight > twoLineTargetPx() + 1 && size > MIN_SIZE && attempts < 30) {
+        size -= STEP;
+        span.style.setProperty('font-size', size + 'em', 'important');
+        attempts++;
+      }
+
+      span.style.setProperty('display', '-webkit-box', 'important');
+      span.style.setProperty('-webkit-box-orient', 'vertical', 'important');
+      span.style.setProperty('-webkit-line-clamp', '2', 'important');
+      span.style.setProperty('overflow', 'hidden', 'important');
+    });
+
+    // Nach dem Row-Layout-Fix + Font-Fitting: einheitliche Hoehe anhand
+    // der tatsaechlich hoechsten Karte im aktuellen Grid ermitteln.
+    var maxHeight = 0;
+    heads.forEach(function (head) {
+      head.style.removeProperty('min-height');
+    });
+    heads.forEach(function (head) {
+      if (head.offsetHeight > maxHeight) maxHeight = head.offsetHeight;
+    });
+    heads.forEach(function (head) {
+      head.style.setProperty('min-height', maxHeight + 'px', 'important');
     });
   }
 
@@ -1340,110 +1420,29 @@ items.push({
   }
 
 
-  // ── JSON-LD Helper: injizieren / entfernen ─────────────────────────────────
-  function injectJsonLd(id, obj) {
-    var el = document.getElementById(id);
-    if (!el) {
-      el = document.createElement("script");
-      el.type = "application/ld+json";
-      el.id = id;
-      document.head.appendChild(el);
-    }
-    el.textContent = JSON.stringify(obj);
-  }
-  function removeJsonLd(id) {
-    var el = document.getElementById(id);
-    if (el) el.parentNode.removeChild(el);
-  }
-
-  // ── Meta-Tag Helper: setzen oder aktualisieren ─────────────────────────────
-  function setSeoMeta(attr, key, val) {
-    if (!val) return;
-    var el = document.querySelector('meta[' + attr + '="' + key + '"]');
-    if (!el) {
-      el = document.createElement("meta");
-      el.setAttribute(attr, key);
-      document.head.appendChild(el);
-    }
-    el.setAttribute("content", val);
-  }
-
+  // ── SEO: nur noch der Dokumenttitel ───────────────────────────────────────
+  // Description, Open Graph, Twitter Cards, Canonical, robots und JSON-LD
+  // kommen seit Subtask 2-4 serverseitig aus dem MU-Plugin hs-seo-meta.php
+  // und stehen damit schon im initialen HTML. Die clientseitige Injektion
+  // wurde entfernt, weil sie
+  //   - die serverseitigen Werte im DOM ueberschrieben hat (zwei Quellen
+  //     der Wahrheit fuer dieselben Tags),
+  //   - das Canonical auf window.location.href gesetzt hat -- inklusive
+  //     Query-Parametern wie ?utm_source= oder ?gclid=, was ein Canonical
+  //     nie enthalten darf,
+  //   - das serverseitige robots-Tag "max-image-preview:large" durch
+  //     "index,follow" ersetzt und damit grosse Bildvorschauen in den
+  //     Suchergebnissen verloren hat,
+  //   - und ein zweites JSON-LD erzeugt hat, das die USP-Aussagen aus
+  //     Slot 1-9 als schema.org-Question ausgegeben hat (Richtlinien-
+  //     verstoss) sowie ein Offer ohne price (ungueltig).
+  //
+  // document.title bleibt bis auf Weiteres hier, weil der serverseitige
+  // <title> noch aus dem WordPress-Seitentitel kommt. Sobald der Title
+  // ebenfalls serverseitig gesetzt wird, kann auch das entfallen.
   function injectSEO(opts) {
-    // opts: { title, description, url, image, keywords, faqItems }
     opts = opts || {};
-
-    // 1) document.title dynamisch pro Cluster-/Detailseite
     if (opts.title) document.title = opts.title;
-
-    var desc = opts.description ? String(opts.description).substring(0, 160) : "";
-    var pageUrl = opts.url || window.location.href;
-
-    // 2) OG- und Twitter-Tags dynamisch
-    setSeoMeta("name", "description", desc);
-    setSeoMeta("property", "og:title", opts.title);
-    setSeoMeta("property", "og:description", desc);
-    setSeoMeta("property", "og:type", "website");
-    setSeoMeta("property", "og:url", pageUrl);
-    if (opts.image) setSeoMeta("property", "og:image", opts.image);
-    setSeoMeta("name", "twitter:card", opts.image ? "summary_large_image" : "summary");
-    setSeoMeta("name", "twitter:title", opts.title);
-    setSeoMeta("name", "twitter:description", desc);
-    if (opts.image) setSeoMeta("name", "twitter:image", opts.image);
-
-    // 3) Canonical-Tag + robots-Meta (keine Seite wird ausgeschlossen)
-    var canonical = document.querySelector('link[rel="canonical"]');
-    if (!canonical) {
-      canonical = document.createElement("link");
-      canonical.setAttribute("rel", "canonical");
-      document.head.appendChild(canonical);
-    }
-    canonical.setAttribute("href", pageUrl);
-    setSeoMeta("name", "robots", "index,follow");
-
-    // JSON-LD: SoftwareApplication fuer API-Produkte (bestehend, unveraendert)
-    var ld = {
-      "@context": "https://schema.org",
-      "@type": "SoftwareApplication",
-      "name": opts.title || document.title,
-      "description": desc,
-      "applicationCategory": "SportsDataAPI",
-      "operatingSystem": "Web",
-      "offers": {
-        "@type": "Offer",
-        "priceCurrency": "EUR",
-        "availability": "https://schema.org/InStock"
-      },
-      "provider": {
-        "@type": "Organization",
-        "name": "HEIM:SPIEL",
-        "url": "https://heimspiel.de"
-      },
-      "keywords": opts.keywords || ""
-    };
-    var existing = document.querySelector('#hs-jsonld');
-    if (existing) existing.remove();
-    var script = document.createElement('script');
-    script.type = 'application/ld+json';
-    script.id = 'hs-jsonld';
-    script.text = JSON.stringify(ld, null, 2);
-    document.head.appendChild(script);
-
-    // 4) FAQPage JSON-LD -- generisch aus den sichtbaren FAQ-Items gebaut
-    if (opts.faqItems && opts.faqItems.length) {
-      injectJsonLd("hs-seo-jsonld-faq", {
-        "@context": "https://schema.org",
-        "@type": "FAQPage",
-        "mainEntity": opts.faqItems.map(function (item) {
-          return {
-            "@type": "Question",
-            "name": item.headline,
-            "acceptedAnswer": { "@type": "Answer", "text": item.text }
-          };
-        })
-      });
-    } else {
-      removeJsonLd("hs-seo-jsonld-faq");
-    }
   }
 
 
@@ -2042,33 +2041,56 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
     return displayLabel + buildCompetitionSuffix(c);
   }
 
+// NEU: Gender-Suffix-Uebersetzungen aus dem General Index (Spalte
+  // "genderTranslations", Format wie statstranslations:
+  //   "female=F, mixed=mixed"
+  // Leerer Wert (z.B. "mixed=") blendet das Suffix fuer diesen Wert aus.
+  // Faellt auf die bisherigen Defaults zurueck, falls die Spalte fehlt/leer
+  // ist -- dadurch ist die Aenderung rueckwaertskompatibel.
+  var hsGenderMapCache = null;
+  function genderTranslationMap() {
+    if (hsGenderMapCache) return hsGenderMapCache;
+    var gi = window.hsGeneralIndexData || {};
+    var raw = String(gi.gendertranslations || "").trim();
+    var map;
+    if (raw) {
+      map = {};
+      raw.split(",").forEach(function (pair) {
+        var i = pair.indexOf("=");
+        if (i === -1) return;
+        var key = pair.slice(0, i).trim().toLowerCase();
+        if (key) map[key] = pair.slice(i + 1).trim();
+      });
+    } else {
+      map = isDE
+        ? { female: "weiblich", mixed: "mixed" }
+        : { female: "female",   mixed: "mixed" };
+    }
+    hsGenderMapCache = map;
+    return map;
+  }
+
   // NEU (v101.6): Haengt Geschlecht (uebersetzt) und/oder Altersklasse (unveraendert,
   // z.B. "U17") in Klammern an den Wettbewerbsnamen an, falls die Rohdaten-Spalten
   // "gender" bzw. "age" befuellt sind. "male"/"female" werden je nach Seitensprache
   // uebersetzt; alle anderen Gender-Werte werden unveraendert durchgereicht. Wird
   // sowohl von buildCompetitionDisplayLabel() (globale Top-Wettbewerbe) als auch
   // von compRowHtml() (Laender-/Foederations-Panel) genutzt, damit die Anzeige an
-  // beiden Stellen konsistent ist.
+  // beiden Stellen konsistent ist
   function buildCompetitionSuffix(c) {
     if (!c) return "";
     var parts = [];
-    var genderRaw = (c.gender || "").trim();
-    if (genderRaw) {
-      var genderKey = genderRaw.toLowerCase();
-      // v101.8 FIX: "male" ist der Standardfall (meiste Wettbewerbe sind
-      // maennlich) und soll deshalb NICHT als Suffix angezeigt werden --
-      // nur "female" und "mixed" sind fuer die Anzeige relevant, da sie
-      // vom Standardfall abweichen und den Wettbewerb eindeutig machen
-      // (z.B. "Bundesliga (female)" vs. "Bundesliga" fuer Maenner).
-      var genderMap = {
-        female: { de: "weiblich", en: "female" },
-        mixed:  { de: "mixed",    en: "mixed" }
-      };
-      if (genderMap[genderKey]) {
-        parts.push(isDE ? genderMap[genderKey].de : genderMap[genderKey].en);
+    var genderKey = String(c.gender || "").trim().toLowerCase();
+    if (genderKey) {
+      var map = genderTranslationMap();
+      // "male" bleibt wie bisher der Standardfall ohne Suffix -- solange es
+      // nicht explizit in genderTranslations gepflegt wird.
+      if (Object.prototype.hasOwnProperty.call(map, genderKey)) {
+        var label = map[genderKey];
+        if (label) parts.push(label);
       }
     }
-    var ageRaw = (c.age || "").trim();
+    var ageRaw = String(c.age || "").trim();
     if (ageRaw) parts.push(ageRaw);
     return parts.length ? " (" + parts.join(", ") + ")" : "";
   }
