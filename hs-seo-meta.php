@@ -19,7 +19,7 @@
  *              v1.3.0 (Subtask 6): <title> serverseitig ueber
  *              pre_get_document_title -- Quelle seoTitle aus dem Sheet,
  *              sonst heroHeadline plus Markensuffix.
- * Version:     1.5.0
+ * Version:     1.6.0
  * Author:      HEIM:SPIEL
  */
 
@@ -151,6 +151,10 @@ class HS_Seo_Meta {
 			return; // Keine Provisioner-Landingpage -> nichts anfassen.
 		}
 
+		// Zuerst die Preloads: Sie sollen so weit oben im <head> stehen wie
+		// moeglich, damit der Browser die Anfragen sofort startet.
+		self::render_preloads( $ctx );
+
 		$meta = self::get_meta( $ctx );
 
 		$out = array();
@@ -219,6 +223,103 @@ class HS_Seo_Meta {
 		}
 
 		echo '<!-- / HEIM:SPIEL SEO Meta -->' . "\n";
+	}
+
+	/**
+	 * Subtask 11: Preload-Hints fuer die JSON-Endpunkte, die hs-landing.js
+	 * braucht, bevor es den Inhalt rendern kann.
+	 *
+	 * WARUM: Gemessen an /de/fussball/ laufen die Datenabrufe in zwei Etappen
+	 * hintereinander statt parallel. Zeile 117 holt Index und General Index
+	 * gemeinsam (rund 1.334 ms), erst danach folgt in renderCluster() Zeile 371
+	 * der Coverage-Abruf (weitere rund 1.527 ms). Zusammen etwa 2,9 Sekunden,
+	 * in denen der Loader steht.
+	 *
+	 * Die Reihenfolge im JavaScript ist nachvollziehbar, weil useCoverageMode
+	 * vom Index abhaengt -- man braucht ihn, um zu ENTSCHEIDEN, ob Coverage
+	 * noetig ist. Zum STARTEN der Anfrage braucht man ihn nicht: Der Sport steht
+	 * im data-bundle-Attribut, und serverseitig wissen wir zusaetzlich aus dem
+	 * Snapshot, ob die Seite ueberhaupt im Coverage-Modus rendert.
+	 *
+	 * Mit den Preload-Hints starten alle drei Anfragen beim Parsen des <head> --
+	 * parallel und bevor die rund 177 KB Inline-JavaScript geparst sind. Wenn
+	 * hs-landing.js sie spaeter anfordert, liegen sie im Browser-Cache.
+	 *
+	 * WICHTIG -- die URLs muessen ZEICHENGENAU denen im JavaScript entsprechen,
+	 * sonst laedt der Browser zweimal statt einmal:
+	 *   - window.HS_CACHE_BASE ist nicht gesetzt, die URLs sind also relativ zur
+	 *     Domainwurzel und haben KEIN Sprachpraefix (/wp-json/..., nicht
+	 *     /de/wp-json/...).
+	 *   - Die Sprachweiche entspricht isDE aus dem Skript, das pageLang aus
+	 *     document.documentElement.lang liest -- deckungsgleich mit WPML.
+	 *   - Der Coverage-Key ist slugify(data-bundle). Fuer /de/fussball/ ist das
+	 *     "football", NICHT "fussball" -- beide Endpunkte existieren und liefern
+	 *     unterschiedliche Daten.
+	 *
+	 * Kein crossorigin-Attribut: Die Abrufe sind gleichoriginig, fetch() nutzt
+	 * dort credentials "same-origin". Mit crossorigin wuerde der Modus nicht
+	 * uebereinstimmen und der Browser die Daten doppelt holen.
+	 *
+	 * @param array $ctx Kontext aus get_root_context().
+	 */
+	private static function render_preloads( $ctx ) {
+		$base = '/wp-json/hs-cache/v1/';
+		$lang = self::current_lang();
+
+		$urls = ( 'de' === $lang )
+			? array( $base . 'indexDe', $base . 'generalIndexDe' )
+			: array( $base . 'index', $base . 'generalIndex' );
+
+		// Coverage nur dort, wo die Seite tatsaechlich im Coverage-Modus rendert.
+		// Belegt wird das am gespeicherten Snapshot: Cluster-Seiten mit
+		// Disziplin-Zwischenebene (z.B. Wintersport) und Detailseiten holen
+		// diesen Endpunkt nicht -- ein Preload waere dort verschwendet und wuerde
+		// in der Konsole als ungenutzt gemeldet.
+		$content       = isset( $ctx['content'] ) ? (string) $ctx['content'] : '';
+		$uses_coverage = (
+			false !== strpos( $content, 'hs-coverage-more-item' ) ||
+			false !== strpos( $content, 'hs-top-competitions' )
+		);
+
+		if ( $uses_coverage ) {
+			$slug = self::slugify( isset( $ctx['bundle'] ) ? $ctx['bundle'] : '' );
+			// Sicherheitsnetz: nur ausgeben, wenn der Slug wirklich sauber ist.
+			if ( '' !== $slug && preg_match( '/^[a-z0-9_-]+$/', $slug ) ) {
+				$urls[] = $base . 'coverage/' . $slug;
+			}
+		}
+
+		echo "\n<!-- HEIM:SPIEL Preload der Landing-Daten -->\n";
+		foreach ( $urls as $url ) {
+			echo '<link rel="preload" href="' . esc_url( $url ) . '" as="fetch" />' . "\n";
+		}
+	}
+
+	/**
+	 * Spiegelt slugify() aus hs-landing.js.
+	 *
+	 * Bewusst ohne iconv-Transliteration: Die Ausgabe muss zeichengenau der des
+	 * Skripts entsprechen, und iconv liefert je nach Locale unterschiedliche
+	 * Ergebnisse. Die im Sheet vorkommenden Sonderfaelle sind die deutschen
+	 * Umlaute und das Eszett -- genau die behandelt das Skript ebenfalls
+	 * explizit, bevor es normalisiert.
+	 *
+	 * @param  string $str Rohwert aus data-bundle.
+	 * @return string
+	 */
+	private static function slugify( $str ) {
+		$s = self::lower( trim( (string) $str ) );
+
+		$s = str_replace(
+			array( 'ä', 'ö', 'ü', 'ß' ),
+			array( 'ae', 'oe', 'ue', 'ss' ),
+			$s
+		);
+
+		$s = preg_replace( '/[^a-z0-9_-]+/', '-', $s );
+		$s = preg_replace( '/-+/', '-', $s );
+
+		return is_string( $s ) ? trim( $s, '-' ) : '';
 	}
 
 	/**
