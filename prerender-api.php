@@ -12,10 +12,6 @@ if ( ! defined( 'ABSPATH' ) ) exit;
  *
  * Auth: WordPress Application Password (Basic Auth), Capability-Check via
  * permission_callback -- KEIN __return_true wie bei den Lese-Endpunkten.
- *
- * WICHTIG (lokal, nicht nur im Repo): Diese Datei gehoert in den lokalen
- * includes/-Ordner des Plugins (analog zu cache.php, rest-api.php, etc.),
- * bevor das Plugin neu gezippt und in WordPress hochgeladen wird.
  */
 
 add_action( 'rest_api_init', 'hs_register_prerender_routes' );
@@ -53,7 +49,7 @@ function hs_register_prerender_routes() {
 /**
  * Nimmt Base64-Bilddaten entgegen (bereits als WebP konvertiert, das passiert
  * im Node-Skript VOR dem Upload), speichert sie in der Mediathek und setzt
- * automatisch Alt-Text und Titel -- wichtig fuer Bild-SEO.
+ * automatisch Alt-Text und Titel -- wichtig fuer Bild-SEO (siehe Subtask-Plan).
  */
 function hs_rest_prerender_upload_media( WP_REST_Request $request ) {
 	$filename   = $request->get_param( 'filename' );
