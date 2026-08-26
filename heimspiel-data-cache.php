@@ -2,11 +2,28 @@
 /**
  * Plugin Name: HEIMSPIEL Data Cache
  * Description: Cached WP-REST-API Layer fuer die HEIMSPIEL Landingpages (hs-landing.js). Holt Index-/CSV-Daten aus Google Sheets (via Google Apps Script Web App), cached sie als Transients und stellt sie unter /wp-json/hs-cache/v1/... performant zur Verfuegung.
- * Version: 1.3
+ * Version: 1.4
  * Author: HEIMSPIEL
  * Text Domain: heimspiel-data-cache
  *
  * Changelog:
+ * v1.4 -- August 2026: Neu: includes/prerender-sync.php in $hs_includes
+ *         aufgenommen. Ersetzt die fruehere Push-Variante aus
+ *         includes/prerender-api.php (POST /prerender/media von GitHub
+ *         Actions aus), die von einer Hosting-/Cloud-IP-Firewall blockiert
+ *         wurde (401 rest_forbidden bei authentifizierten POST-Requests aus
+ *         GitHub-Actions-IP-Bereichen -- AIOS und alle anderen WP-Plugins
+ *         waren dabei nicht die Ursache, siehe Debugging-Historie).
+ *         Neuer Ablauf: GitHub Actions committet fertige WebP-Bilder +
+ *         image-mapping.json direkt ins Repo (dist/hero-images/), und
+ *         WordPress HOLT sich diese Dateien selbst ab (ausgehender Request,
+ *         wird von Inbound-Firewalls nicht geblockt) -- per taeglichem
+ *         WP-Cron (hs_prerender_sync_cron) ODER manuellem Button auf der
+ *         Admin-Seite "HEIMSPIEL Cache". includes/prerender-api.php bleibt
+ *         vorerst im Plugin (fuer /prerender/page -- Puppeteer-HTML-Writeback
+ *         aus Subtask 6, dort ist noch offen, ob dieselbe Firewall-Blockade
+ *         zuschlaegt oder nicht, da /prerender/page bisher nicht getestet
+ *         wurde).
  * v1.3 -- Juli 2026: FIX: HS_GSHEET_INDEX_URL etc. zeigten faelschlicherweise
  *         auf veraltete Sheety-URLs (api.sheety.co/...), obwohl das Projekt
  *         laengst auf eine Google Apps Script Web App umgestellt wurde
@@ -30,7 +47,7 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'HS_CACHE_VERSION', '1.3' );
+define( 'HS_CACHE_VERSION', '1.4' );
 define( 'HS_CACHE_TTL', 31 * DAY_IN_SECONDS ); // Cache-Laufzeit (Transients)
 define( 'HS_CRON_HOOK', 'hs_refresh_all_cache_event' );
 
@@ -68,6 +85,10 @@ if ( ! defined( 'HS_GSHEET_CSV_BASE' ) ) {
 $hs_includes = [
     'includes/cache.php',
     'includes/rest-api.php',
+    'includes/prerender-api.php',
+    'includes/prerender-sync.php',
+    'includes/prerender-snapshot.php',
+    'includes/hs-wpml-auto-translate-exclusions.php',
     'includes/cron.php',
     'includes/admin.php',
 ];
