@@ -19,7 +19,7 @@
  *              v1.3.0 (Subtask 6): <title> serverseitig ueber
  *              pre_get_document_title -- Quelle seoTitle aus dem Sheet,
  *              sonst heroHeadline plus Markensuffix.
- * Version:     1.4.0
+ * Version:     1.5.0
  * Author:      HEIM:SPIEL
  */
 
@@ -94,8 +94,6 @@ class HS_Seo_Meta {
 		// die og:*-Tags danach wieder an. Mit 99 laufen wir garantiert zuletzt.
 		add_filter( 'mtm_head_meta_tags', array( __CLASS__, 'filter_mtm_tags' ), 99 );
 
-		// Cache invalidieren, sobald eine Seite gespeichert wird (z.B. durch
-		// den Snapshot-Writeback -- dann kann sich das hs-root-Markup aendern).
 		// Subtask 10 / Stufe 1: Das komplette Landing-CSS entsteht bisher erst
 		// zur Laufzeit in hs-landing.js -- vier per JavaScript injizierte
 		// <style>-Bloecke, zusammen rund 31 KB mit 152 hs-*-Klassen. Der
@@ -115,6 +113,31 @@ class HS_Seo_Meta {
 		// koennte Flatsome einzelne Regeln ueberschreiben.
 		add_action( 'wp_head', array( __CLASS__, 'render_landing_css' ), 999 );
 
+		// Subtask 10 / Stufe 2: Zwei Korrekturen am ausgelieferten Snapshot,
+		// damit der vorgerenderte Inhalt auch ohne ausgefuehrtes JavaScript
+		// vollstaendig sichtbar ist -- also fuer KI-Crawler, SEO-Werkzeuge und
+		// fuer die erste Sekunde eines normalen Seitenaufrufs.
+		//
+		// 1) hs-landing.js erzeugt die Key-Facts-Zaehler mit HARTCODIERTER 0 als
+		//    Text und dem echten Wert in data-target (Zeile 1817). Ohne
+		//    JavaScript stehen alle drei Kennzahlen deshalb dauerhaft auf 0.
+		//    Wir setzen den Wert aus data-target als Text ein -- die
+		//    Zaehleranimation bleibt unberuehrt, weil sie den Text ohnehin
+		//    ueberschreibt, sobald sie laeuft.
+		//
+		// 2) Die Klasse fade-in setzt opacity:0 und wird erst per
+		//    IntersectionObserver um "visible" ergaenzt (Zeile 2599). Im
+		//    Snapshot sind davon 124 Elemente betroffen, darunter alle
+		//    Top-Wettbewerbs-Karten. Wir entfernen die Klasse aus dem
+		//    ausgelieferten Markup; das live neu gerenderte Markup von
+		//    hs-landing.js bekommt sie weiterhin, die Animation bleibt also
+		//    fuer Besucher mit JavaScript vollstaendig erhalten.
+		//
+		// Prioritaet 20: nach do_blocks (9), wpautop (10) und den Shortcodes (11).
+		add_filter( 'the_content', array( __CLASS__, 'filter_snapshot_markup' ), 20 );
+
+		// Cache invalidieren, sobald eine Seite gespeichert wird (z.B. durch
+		// den Snapshot-Writeback -- dann kann sich das hs-root-Markup aendern).
 		add_action( 'save_post', array( __CLASS__, 'flush_cache_for_post' ), 10, 1 );
 	}
 
@@ -955,7 +978,7 @@ class HS_Seo_Meta {
 			$blocks['hs-cluster-body-fix'] = self::css_body_fix();
 		}
 
-		echo "\n<!-- HEIM:SPIEL Landing-CSS serverseitig, v1.4.0 -->\n";
+		echo "\n<!-- HEIM:SPIEL Landing-CSS serverseitig -->\n";
 
 		foreach ( $blocks as $id => $rules ) {
 			$rules = trim( $rules );
@@ -965,6 +988,111 @@ class HS_Seo_Meta {
 			// phpcs:ignore WordPress.Security.EscapeOutput -- statisches, eigenes CSS.
 			echo '<style id="' . esc_attr( $id ) . '">' . $rules . "</style>\n";
 		}
+	}
+
+	/* -------------------------------------------------------------------- *
+	 * Subtask 10 / Stufe 2: Snapshot ohne JavaScript nutzbar machen
+	 * -------------------------------------------------------------------- */
+
+	/**
+	 * Korrigiert das ausgelieferte Snapshot-Markup an zwei Stellen.
+	 *
+	 * Greift ausschliesslich auf Provisioner-Landingpages und nur dann, wenn im
+	 * Inhalt ueberhaupt eines der beiden Muster vorkommt. Beide Ersetzungen sind
+	 * zusaetzlich gegen einen preg-Fehler abgesichert: Falls
+	 * preg_replace_callback null liefert, bleibt der urspruengliche Inhalt
+	 * unveraendert, statt eine leere Seite auszuliefern.
+	 *
+	 * @param  string $content Post-Content nach wpautop/Shortcodes.
+	 * @return string
+	 */
+	public static function filter_snapshot_markup( $content ) {
+		if ( ! is_string( $content ) || '' === $content ) {
+			return $content;
+		}
+
+		$has_counter = ( false !== strpos( $content, 'hs-sb-val' ) );
+		$has_fade    = ( false !== strpos( $content, 'fade-in' ) );
+
+		if ( ! $has_counter && ! $has_fade ) {
+			return $content;
+		}
+		if ( ! self::get_root_context() ) {
+			return $content; // Keine Provisioner-Landingpage -> nichts anfassen.
+		}
+
+		if ( $has_counter ) {
+			$new = preg_replace_callback(
+				'/<div([^>]*\bhs-sb-val\b[^>]*)>\s*0\s*<\/div>/',
+				array( __CLASS__, 'counter_callback' ),
+				$content
+			);
+			if ( is_string( $new ) && '' !== $new ) {
+				$content = $new;
+			}
+		}
+
+		if ( $has_fade ) {
+			$new = preg_replace_callback(
+				'/class="([^"]*fade-in[^"]*)"/',
+				array( __CLASS__, 'fade_in_callback' ),
+				$content
+			);
+			if ( is_string( $new ) && '' !== $new ) {
+				$content = $new;
+			}
+		}
+
+		return $content;
+	}
+
+	/**
+	 * Ersetzt die hartcodierte 0 eines Key-Facts-Zaehlers durch den Wert aus
+	 * data-target.
+	 *
+	 * Die Formatierung entspricht exakt hs-landing.js:
+	 *     el.textContent = t >= 1000 ? v.toLocaleString('de-DE') : String(v);
+	 * Also Tausenderpunkt ab 1000, sonst die reine Zahl. Bewusst auch auf den
+	 * englischen Seiten, damit serverseitiger Wert und Animationsergebnis
+	 * identisch sind und beim Uebernehmen durch das Skript nichts umspringt.
+	 *
+	 * @param  array $m Treffer aus preg_replace_callback.
+	 * @return string
+	 */
+	public static function counter_callback( $m ) {
+		if ( ! preg_match( '/data-target="(\d+)"/', $m[1], $t ) ) {
+			return $m[0]; // Kein Zielwert -> unveraendert lassen.
+		}
+
+		$n     = (int) $t[1];
+		$value = ( $n >= 1000 ) ? number_format( $n, 0, ',', '.' ) : (string) $n;
+
+		return '<div' . $m[1] . '>' . $value . '</div>';
+	}
+
+	/**
+	 * Entfernt aus einer Klassenliste genau das Token "fade-in".
+	 *
+	 * Wird tokenweise verglichen, damit die Flatsome-Klassen hover-fade-in,
+	 * bg-fade-in, image-fade-in und slide-fade-in unberuehrt bleiben.
+	 *
+	 * @param  array $m Treffer aus preg_replace_callback.
+	 * @return string
+	 */
+	public static function fade_in_callback( $m ) {
+		$classes = preg_split( '/\s+/', $m[1], -1, PREG_SPLIT_NO_EMPTY );
+		if ( ! is_array( $classes ) ) {
+			return $m[0];
+		}
+
+		$kept = array();
+		foreach ( $classes as $class ) {
+			if ( 'fade-in' !== $class ) {
+				$kept[] = $class;
+			}
+		}
+
+		return 'class="' . implode( ' ', $kept ) . '"';
 	}
 
 	/** @return string Inhalt von <style id="hs-landing-styles">. */
