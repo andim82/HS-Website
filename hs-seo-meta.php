@@ -19,7 +19,7 @@
  *              v1.3.0 (Subtask 6): <title> serverseitig ueber
  *              pre_get_document_title -- Quelle seoTitle aus dem Sheet,
  *              sonst heroHeadline plus Markensuffix.
- * Version:     1.6.0
+ * Version:     1.6.1
  * Author:      HEIM:SPIEL
  */
 
@@ -1054,8 +1054,24 @@ class HS_Seo_Meta {
 	 * Gibt die vier Style-Bloecke aus hs-landing.js im <head> aus, damit der
 	 * vorgerenderte Snapshot sofort korrekt formatiert dargestellt wird.
 	 *
-	 * Der Inhalt ist byteidentisch mit dem, was hs-landing.js zur Laufzeit
-	 * injizieren wuerde -- ein optischer Unterschied ist damit ausgeschlossen.
+	 * ACHTUNG -- DIES IST DIE EINZIGE WIRKSAME CSS-QUELLE:
+	 * Weil injectStyles() in hs-landing.js sich selbst abschaltet, sobald es hier
+	 * ein <style> mit derselben ID findet, ist dieser Block die einzige Fassung,
+	 * die tatsaechlich greift. CSS-Aenderungen in hs-landing.js bleiben ohne
+	 * Wirkung, solange dieses MU-Plugin aktiv ist. Jede Regelaenderung muss also
+	 * HIER erfolgen -- und zur Nachvollziehbarkeit zusaetzlich in hs-landing.js,
+	 * damit die beiden Fassungen nicht auseinanderlaufen.
+	 *
+	 * Abweichungen gegenueber dem Stand von hs-landing.js:
+	 *   v1.6.1  .hs-cov-name -> margin:0;color:inherit;
+	 *           Notwendig, seit die Kartentitel <h3> statt <span> sind: Flatsome
+	 *           setzt h1..h6{color:#555}, das Child-Theme h1..h6{color:#323232}.
+	 *           Beides hebelt die Vererbung von .hs-cov-head (color:#fff) aus,
+	 *           die ein <span> noch hatte.
+	 *   v1.6.1  .hs-subtext-bar -> padding:0 0 5rem
+	 *           Seit der Erklaerungstext UNTER den Karten steht, lagen 112 px
+	 *           darueber und 0 px darunter -- der Text wirkte dadurch als Teil
+	 *           des folgenden dunklen Abschnitts.
 	 *
 	 * hs-cluster-body-fix und hs-detail-body-fix haben identischen Inhalt und
 	 * sind jeweils nur fuer einen Seitentyp gedacht; ausgegeben wird deshalb
@@ -1273,7 +1289,7 @@ class HS_Seo_Meta {
 .hs-coverage-intro{padding-top:40px;padding-bottom:8px;}
 .hs-coverage-intro .hs-section-bar{margin-bottom:0;}
 .hs-cards-section-compact .hs-section-title{font-size:clamp(1.3rem,2.2vw,1.9rem);}
-.hs-subtext-bar{padding:2rem 0 0;background:#f8f9fb;}
+.hs-subtext-bar{padding:0 0 5rem;background:#f8f9fb;}
 .hs-subtext{font-size:.9rem;color:#6b7280;line-height:1.7;max-width:860px;margin:0 auto;text-align:center;}
 .hs-coverage-section{padding:40px 0 80px;background:#f8f9fb;}
 .hs-cov-grid{display:grid;gap:1.125rem;}
@@ -1284,7 +1300,7 @@ class HS_Seo_Meta {
 .hs-cov-head{background:#061d3e;color:#fff;padding:.9rem 1.1rem;display:flex;align-items:center;gap:.7rem;flex-shrink:0;}
 .hs-cov-icon{width:30px;height:30px;border-radius:6px;background:rgba(231,85,25,0.2);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .hs-cov-icon svg{width:16px;height:16px;stroke:#e75519;}
-.hs-cov-name{font-size:.875rem;font-weight:900;}
+.hs-cov-name{font-size:.875rem;font-weight:900;margin:0;color:inherit;}
 .hs-cov-body{padding:.85rem 1.1rem;background:#f8f9fb;flex:1;}
 .hs-cov-list{list-style:none;padding:0;margin:0;}
 .hs-cov-list li{font-size:.825rem;color:#6b7280;padding:.14rem 0;display:flex;align-items:flex-start;gap:.5rem;}
