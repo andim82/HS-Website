@@ -142,6 +142,7 @@ function hs_render_admin_page() {
 		<p style="margin-top:1.5rem;color:#666;">
 			Die <code>CONFIG</code> in <code>hs-landing.js</code> enthält bereits alle URLs.
 		</p>
+<?php do_action( 'hs_data_cache_admin_page_footer' ); ?>
 	</div>
 	<?php
 }
