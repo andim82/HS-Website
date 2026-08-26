@@ -4,418 +4,402 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 error_log( 'HS DEBUG: prerender-snapshot.php wurde geladen.' );
 
 /**
- * HEIM:SPIEL Prerender Snapshot Writeback -- v1.3
+ * HEIM:SPIEL Prerender Snapshot Writeback -- v1.4
  *
  * Nimmt den von scripts/snapshot-pages.mjs (Puppeteer) erzeugten,
  * fertig gerenderten HTML-Inhalt entgegen und schreibt ihn GEZIELT nur
- * in den Bereich <div id="hs-root">...</div> der jeweiligen Seite.
+ * in den Bereich <div id="hs-root">...</div> der jeweiligen Seite --
+ * der Rest des Seiteninhalts (WP-Bloecke, das <script src=".../hs-
+ * landing.js">-Tag) bleibt unangetastet.
  *
- * v1.3 FIX (entscheidend): Der bisherige Code berechnete zwar einen
- * robusteren Ersetzungs-Anker (ueber den letzten <!-- /wp:html -->
- * Kommentar bzw. als Fallback ueber den <script>-Tag), verwendete
- * anschliessend aber versehentlich eine ALTE, aus einer Vorversion
- * uebrig gebliebene Variable ($script_start_absolute statt
- * $anchor_start_absolute) fuer den Schnittpunkt von $after. Dadurch
- * wurde -- immer wenn der neue /wp:html-Zweig griff -- $script_match
- * NIE gesetzt, PHP werte $script_match[0][1] als 0, und $after
- * enthielt dadurch praktisch den KOMPLETTEN alten #hs-root-Inhalt statt
- * nur den Teil nach dem echten Ende. Der neue Snapshot wurde also vor
- * den kompletten alten Inhalt gesetzt, statt ihn zu ersetzen -- genau
- * das fuehrte zu der fortlaufenden Duplizierung bei jedem Lauf.
+ * v1.1 FIX: Der bisherige Code hat $after bei Beginn des oeffnenden
+ * <script>-Tags angesetzt und dabei den ORIGINAL-</script>-Schliesstag
+ * nach dem Script-Code stehen lassen. WordPress/Gutenberg normalisierte
+ * dadurch die resultierende ungueltige Struktur und der Script-Anker ging
+ * nach dem ersten erfolgreichen Writeback verloren. Jetzt wird der ganze
+ * Script-Block <script ...>...</script> explizit erkannt, unveraendert
+ * beibehalten und nur der Bereich VOR dem oeffnenden <script> ersetzt.
  *
- * v1.3 NEU: Zusaetzlich wird das #hs-root-Ende jetzt primaer ueber eine
- * robuste Div-Tiefenzaehlung ermittelt (hs_prerender_find_hs_root_close).
- * Das ist unabhaengig von <!-- /wp:html --> Kommentaren oder <script>-
- * Tags, die durch WPML-Uebersetzungs-Sync, Editor-Saves oder fruehere
- * fehlerhafte Snapshot-Laeufe veraendert, entfernt oder dupliziert
- * worden sein koennen. Die Kommentar-/Script-basierte Suche bleibt nur
- * noch als letzter Fallback erhalten, falls die Tiefenzaehlung aus
- * irgendeinem Grund kein ausgeglichenes Ergebnis liefert.
+ * v1.2 FIX: WPML-sprachbewusste Post-Aufloesung plus Sprachabgleich vor dem
+ * Schreiben. Vorher wurden DE-Snapshots von Seiten mit identischem DE/EN-Slug
+ * (biathlon, skeleton, snowboard) in den englischen Post geschrieben.
  *
- * TEMP DEBUG: Der spezielle Body <p>__HS_DEBUG_ONLY__</p> prueft nur die
- * URL-/Post-Aufloesung und schreibt NICHT in post_content. Nach Abschluss
- * der Diagnose kann dieser Block entfernt werden.
+ * v1.3 FIX: Der <script>-Anker als Endmarke ist entfallen. WordPress entfernt
+ * beim Speichern via wp_update_post() im REST-Kontext alle <script>-Tags
+ * (KSES, kein "unfiltered_html"), wodurch jede Seite nach dem ERSTEN Writeback
+ * dauerhaft mit HTTP 422 blockiert war. Das schliessende </div> wird jetzt per
+ * Tiefenzaehlung ermittelt -- ankerfrei und beliebig oft wiederholbar.
+ *
+ * v1.4 FIX: Dieselbe KSES-Ursache traf auch die Formularelemente. Die
+ * WordPress-Standardliste erlaubter Tags fuer post_content enthaelt <form>,
+ * <input>, <textarea> und <select> nicht -- <button> dagegen schon. Im
+ * gespeicherten Snapshot ueberlebte deshalb der Submit-Button des
+ * Kontaktformulars, aber keines der Eingabefelder, und ebenso fehlte das
+ * Suchfeld der Wettbewerbsliste. Die erlaubten Tags werden nun GENAU fuer
+ * den einen wp_update_post()-Aufruf erweitert.
  */
 
 add_action( 'rest_api_init', function () {
-    register_rest_route( 'hs-prerender/v1', '/snapshot', [
-        'methods'             => 'POST',
-        'callback'            => 'hs_prerender_write_snapshot',
-        'permission_callback' => 'hs_prerender_check_snapshot_key',
-        'args'                => [
-            'url'  => [ 'required' => true, 'type' => 'string' ],
-            'html' => [ 'required' => true, 'type' => 'string' ],
-        ],
-    ] );
+register_rest_route( 'hs-prerender/v1', '/snapshot', [
+'methods'             => 'POST',
+'callback'            => 'hs_prerender_write_snapshot',
+'permission_callback' => 'hs_prerender_check_snapshot_key',
+'args'                => [
+'url'  => [ 'required' => true, 'type' => 'string' ],
+'html' => [ 'required' => true, 'type' => 'string' ],
+],
+] );
 } );
 
 function hs_prerender_check_snapshot_key( WP_REST_Request $req ) {
-    if ( ! defined( 'HS_SNAPSHOT_API_KEY' ) || ! HS_SNAPSHOT_API_KEY ) {
-        return new WP_Error( 'no_key_configured', 'HS_SNAPSHOT_API_KEY ist nicht in wp-config.php definiert.', [ 'status' => 500 ] );
-    }
-
-    $provided = $req->get_header( 'x-hs-snapshot-key' );
-    if ( ! $provided || ! hash_equals( HS_SNAPSHOT_API_KEY, $provided ) ) {
-        return new WP_Error( 'forbidden', 'Ungueltiger oder fehlender X-HS-Snapshot-Key Header.', [ 'status' => 403 ] );
-    }
-
-    return true;
+if ( ! defined( 'HS_SNAPSHOT_API_KEY' ) || ! HS_SNAPSHOT_API_KEY ) {
+return new WP_Error( 'no_key_configured', 'HS_SNAPSHOT_API_KEY ist nicht in wp-config.php definiert.', [ 'status' => 500 ] );
 }
-
-/** Ermittelt die erwartete Sprache aus dem URL-Pfad. */
-function hs_prerender_lang_from_url( $url ) {
-    $parsed = wp_parse_url( $url );
-    $path = isset( $parsed['path'] ) ? trim( $parsed['path'], '/' ) : '';
-    $segments = $path === '' ? [] : explode( '/', $path );
-
-    if ( ! empty( $segments ) && strtolower( $segments[0] ) === 'de' ) {
-        return 'de';
-    }
-
-    return 'en';
+$provided = $req->get_header( 'x-hs-snapshot-key' );
+if ( ! $provided || ! hash_equals( HS_SNAPSHOT_API_KEY, $provided ) ) {
+return new WP_Error( 'forbidden', 'Ungueltiger oder fehlender X-HS-Snapshot-Key Header.', [ 'status' => 403 ] );
 }
-
-/** Prueft die WPML-Sprache eines Posts, sofern WPML verfuegbar ist. */
-function hs_prerender_post_lang_matches( $post_id, $target_lang ) {
-    if ( ! has_filter( 'wpml_element_language_code' ) ) {
-        return true;
-    }
-
-    $lang = apply_filters( 'wpml_element_language_code', null, [
-        'element_id'   => $post_id,
-        'element_type' => 'post_page',
-    ] );
-
-    // Fehlt eine WPML-Zuordnung, nicht vorschnell verwerfen. Der normale
-    // Post-/Status-Check bleibt trotzdem zwingend.
-    if ( ! $lang ) {
-        return true;
-    }
-
-    return strtolower( $lang ) === strtolower( $target_lang );
-}
-
-/** Liefert nur veroeffentlichte WordPress-Seiten, nie Attachments/Revisions. */
-function hs_prerender_valid_page( $post_id ) {
-    $post = get_post( $post_id );
-
-    if ( $post && $post->post_type === 'page' && $post->post_status === 'publish' ) {
-        return $post;
-    }
-
-    return null;
+return true;
 }
 
 /**
- * Loest eine vollstaendige URL robust auf eine veroeffentlichte Seite auf.
- * 1. url_to_postid() als Kandidat.
- * 2. Treffer nur bei page + publish + passender WPML-Sprache akzeptieren.
- * 3. Fallback auf Slug-Suche, Sprache und bei Mehrdeutigkeit Parent-Slug.
- * 4. Letzte Instanz: hoechste ID (neueste Seite).
+ * Ermittelt den WPML-Sprachcode aus dem URL-Pfad.
+ *
+ *   "/de/wintersport/biathlon/"  -> "de"
+ *   "/winter-sports/biathlon/"   -> Standardsprache (en)
+ *
+ * Der Vergleich laeuft gegen die aktiv konfigurierten WPML-Sprachen, damit
+ * spaeter ergaenzte Sprachen (fr, es, it) automatisch mitgreifen und ein
+ * Pfadsegment wie "de" nicht mit einem echten Seiten-Slug verwechselt wird.
+ */
+function hs_prerender_lang_from_url( $url ) {
+$parsed = wp_parse_url( $url );
+$path   = ( $parsed && isset( $parsed['path'] ) ) ? trim( $parsed['path'], '/' ) : '';
+$parts  = ( $path !== '' ) ? explode( '/', $path ) : [];
+$first  = isset( $parts[0] ) ? strtolower( $parts[0] ) : '';
+
+$languages = apply_filters( 'wpml_active_languages', null, [ 'skip_missing' => 0 ] );
+if ( is_array( $languages ) && $first !== '' && isset( $languages[ $first ] ) ) {
+return $first;
+}
+
+$default = apply_filters( 'wpml_default_language', null );
+return $default ? (string) $default : '';
+}
+
+/**
+ * Loest eine vollstaendige URL zuverlaessig auf eine Post-ID auf.
+ * url_to_postid() allein scheitert manchmal an Trailing-Slash- oder
+ * Query-String-Abweichungen -- daher mehrere Normalisierungsversuche.
+ *
+ * v1.2 FIX (WPML): url_to_postid() ist NICHT sprachbewusst. Bei Seiten, deren
+ * Slug in DE und EN identisch ist -- biathlon, skeleton, snowboard -- lieferte
+ * die Funktion immer den Post der Standardsprache (EN). Folge: Der DE-Snapshot
+ * wurde in den EN-Post geschrieben. Die EN-Seiten enthielten danach deutschen
+ * Inhalt, die DE-Seiten gar keinen. Seiten mit unterschiedlichen Slugs
+ * (ski-alpin/alpine-skiing, bob/bobsleigh, ...) waren nicht betroffen, weil
+ * der Slug dort ohnehin eindeutig ist.
+ *
+ * Zwei Massnahmen:
+ *   1. WPML VOR der Aufloesung in die Zielsprache schalten.
+ *   2. Das Ergebnis ueber wpml_object_id auf die Uebersetzung in der
+ *      Zielsprache mappen -- ohne Fallback auf das Original, damit ein
+ *      fehlendes Uebersetzungspaar nicht stillschweigend die falsche
+ *      Sprachversion trifft.
  */
 function hs_prerender_resolve_post_id( $url ) {
-    $target_lang = hs_prerender_lang_from_url( $url );
-    $parsed = wp_parse_url( $url );
+$lang = hs_prerender_lang_from_url( $url );
 
-    // Schritt 1: WordPress-Standardresolver, aber nur als gepruefter Kandidat.
-    $url_candidates = [ $url ];
-    if ( $parsed && isset( $parsed['path'] ) ) {
-        $path = $parsed['path'];
-        $url_candidates[] = home_url( $path );
-        $url_candidates[] = home_url( untrailingslashit( $path ) );
-        $url_candidates[] = home_url( trailingslashit( $path ) );
-    }
+if ( $lang ) {
+do_action( 'wpml_switch_language', $lang );
+}
 
-    foreach ( array_unique( $url_candidates ) as $candidate ) {
-        $id = url_to_postid( $candidate );
-        if ( ! $id ) {
-            continue;
-        }
+$candidates = [ $url ];
 
-        $post = hs_prerender_valid_page( $id );
-        if ( ! $post ) {
-            continue;
-        }
+$parsed = wp_parse_url( $url );
+if ( $parsed && isset( $parsed['path'] ) ) {
+$path = $parsed['path'];
+$candidates[] = home_url( $path );
+$candidates[] = home_url( untrailingslashit( $path ) );
+$candidates[] = home_url( trailingslashit( $path ) );
+}
 
-        if ( hs_prerender_post_lang_matches( $id, $target_lang ) ) {
-            return $id;
-        }
-    }
+$id = 0;
+foreach ( array_unique( $candidates ) as $candidate ) {
+$id = url_to_postid( $candidate );
+if ( $id ) break;
+}
 
-    // Schritt 2: Robuster Fallback ueber Slug und bei Bedarf Parent-Slug.
-    if ( ! $parsed || ! isset( $parsed['path'] ) ) {
-        return 0;
-    }
+if ( ! $id ) return 0;
 
-    $segments = array_values( array_filter( explode( '/', trim( $parsed['path'], '/' ) ) ) );
-    if ( empty( $segments ) ) {
-        return 0;
-    }
+if ( $lang ) {
+// 3. Parameter false = KEIN Fallback auf das Original, wenn keine
+// Uebersetzung existiert. Der Sprachabgleich in
+// hs_prerender_write_snapshot() bricht dann sauber mit Fehler ab.
+$translated = apply_filters( 'wpml_object_id', $id, get_post_type( $id ), false, $lang );
+if ( $translated ) {
+$id = (int) $translated;
+}
+}
 
-    $slug = sanitize_title( end( $segments ) );
-    if ( $slug === '' ) {
-        return 0;
-    }
-
-    $parent_slug = null;
-    if ( count( $segments ) >= 2 ) {
-        $maybe_parent = sanitize_title( $segments[ count( $segments ) - 2 ] );
-        if ( $maybe_parent !== '' && $maybe_parent !== 'de' ) {
-            $parent_slug = $maybe_parent;
-        }
-    }
-
-    $matches = get_posts( [
-        'post_type'      => 'page',
-        'post_status'    => 'publish',
-        'name'           => $slug,
-        'posts_per_page' => -1,
-        'no_found_rows'  => true,
-    ] );
-
-    if ( empty( $matches ) ) {
-        return 0;
-    }
-
-    // Zuerst die passende WPML-Sprache bevorzugen.
-    $lang_filtered = array_values( array_filter( $matches, function( $match ) use ( $target_lang ) {
-        return hs_prerender_post_lang_matches( $match->ID, $target_lang );
-    } ) );
-    $final_candidates = ! empty( $lang_filtered ) ? $lang_filtered : $matches;
-
-    // Wenn mehrere Seiten denselben Slug tragen, den Parent-Slug abgleichen.
-    if ( count( $final_candidates ) > 1 && $parent_slug ) {
-        $parent_filtered = array_values( array_filter( $final_candidates, function( $match ) use ( $parent_slug ) {
-            $parent_id = wp_get_post_parent_id( $match->ID );
-            return $parent_id && get_post_field( 'post_name', $parent_id ) === $parent_slug;
-        } ) );
-
-        if ( ! empty( $parent_filtered ) ) {
-            $final_candidates = $parent_filtered;
-        }
-    }
-
-    // Falls danach noch mehrere Kandidaten uebrig sind, die neueste Seite nehmen.
-    usort( $final_candidates, function( $a, $b ) {
-        return $b->ID <=> $a->ID;
-    } );
-
-    return $final_candidates[0]->ID;
+return (int) $id;
 }
 
 /**
- * Findet die Position DIREKT NACH dem echten, strukturell passenden
- * schliessenden </div> zum #hs-root-Element -- durch Zaehlen der
- * verschachtelten <div>-Tiefe ab der oeffnenden Stelle.
+ * Findet zum oeffnenden <div id="hs-root"> das passende schliessende </div>
+ * per Tiefenzaehlung und liefert dessen Startposition zurueck.
  *
- * Robuster als jede Suche nach <!-- /wp:html --> oder <script>-Tags,
- * weil diese durch WPML-Uebersetzungs-Sync, Editor-Saves oder fruehere
- * fehlerhafte Snapshot-Laeufe veraendert, entfernt oder dupliziert
- * worden sein koennen. Die reine Div-Tiefenzaehlung ist unabhaengig
- * davon, WAS im Content spaeter folgt -- auch wenn dort noch
- * wohlgeformte HTML-Fragmente als Altlast angehaengt sind.
+ * Ersetzt das fruehere <script>-Anker-Verfahren, das nach dem ersten
+ * Writeback nicht mehr funktionierte (siehe Kommentar in
+ * hs_prerender_write_snapshot). Diese Variante ist unbegrenzt wiederholbar.
  *
- * @param string $content       Der komplette post_content.
- * @param int    $open_tag_end  Position direkt NACH dem oeffnenden
- *                               <div id="hs-root" ...> Tag.
- * @return int|false Position direkt nach dem passenden </div>, oder
- *                    false, wenn keine ausgeglichene Verschachtelung
- *                    gefunden werden konnte.
+ * @param  string $content    Kompletter post_content.
+ * @param  int    $start      Position direkt NACH dem oeffnenden hs-root-Tag.
+ * @return int|null           Startposition des passenden </div> oder null.
  */
-function hs_prerender_find_hs_root_close( $content, $open_tag_end ) {
-    $depth  = 1; // Das oeffnende hs-root-Tag selbst zaehlt als Tiefe 1.
-    $offset = $open_tag_end;
-    $len    = strlen( $content );
+function hs_prerender_find_matching_div_close( $content, $start ) {
+$depth  = 1;
+$offset = $start;
+$length = strlen( $content );
 
-    while ( $offset < $len && $depth > 0 ) {
-        if ( ! preg_match(
-            '/<div\b[^>]*>|<\/div\s*>/i',
-            $content,
-            $tag_match,
-            PREG_OFFSET_CAPTURE,
-            $offset
-        ) ) {
-            return false; // Kein weiteres div-Tag gefunden -- unausgeglichen.
-        }
+while ( $offset < $length ) {
+if ( ! preg_match( '/<\s*(\/?)div\b[^>]*>/i', $content, $m, PREG_OFFSET_CAPTURE, $offset ) ) {
+return null;
+}
 
-        $tag    = $tag_match[0][0];
-        $offset = $tag_match[0][1] + strlen( $tag );
+$is_closing = ( $m[1][0] === '/' );
+$tag_start  = $m[0][1];
+$tag_end    = $tag_start + strlen( $m[0][0] );
 
-        if ( stripos( $tag, '</div' ) === 0 ) {
-            $depth--;
-        } else {
-            $depth++;
-        }
-    }
+if ( $is_closing ) {
+$depth--;
+if ( $depth === 0 ) {
+return $tag_start;
+}
+} else {
+$depth++;
+}
 
-    return $depth === 0 ? $offset : false;
+$offset = $tag_end;
+}
+
+return null;
 }
 
 /**
- * Fallback-Ermittlung des Ersetzungs-Ankers ueber den letzten
- * <!-- /wp:html --> Kommentar bzw. notfalls einen <script>-Tag direkt
- * nach #hs-root. Wird nur genutzt, wenn die primaere Div-Tiefenzaehlung
- * (hs_prerender_find_hs_root_close) kein ausgeglichenes Ergebnis liefert.
+ * Erweitert die von KSES erlaubten HTML-Tags um Formularelemente.
  *
- * @return int|false
+ * Wird ausschliesslich waehrend des wp_update_post()-Aufrufs im
+ * Snapshot-Writeback registriert und unmittelbar danach wieder entfernt.
+ * Der Inhalt stammt aus der eigenen, serverseitig gerenderten Seite --
+ * es werden keine Fremdinhalte durchgelassen. Alle uebrigen Inhalte der
+ * Website werden weiterhin unveraendert gefiltert.
+ *
+ * @param  array  $tags    Erlaubte Tags samt Attributen.
+ * @param  string $context KSES-Kontext.
+ * @return array
  */
-function hs_prerender_find_fallback_anchor( $content, $open_tag_end ) {
-    // Letztes Vorkommen von "/wp:html" im GESAMTEN content suchen, nicht
-    // nur das erste ab hs-root -- verhindert Treffer mitten in bereits
-    // dupliziertem Altbestand.
-    if ( preg_match_all( '/<!--\s*\/wp:html\s*-->/i', $content, $all_matches, PREG_OFFSET_CAPTURE ) ) {
-        $all_offsets = $all_matches[0];
-        $last = end( $all_offsets );
-        if ( $last[1] > $open_tag_end ) {
-            return $last[1] + strlen( $last[0] );
-        }
-    }
+function hs_prerender_allow_form_tags( $tags, $context ) {
+if ( 'post' !== $context || ! is_array( $tags ) ) {
+return $tags;
+}
 
-    // Letzte Instanz: kompletten <script>-Block direkt nach hs-root suchen.
-    $rest_of_content = substr( $content, $open_tag_end );
-    if ( preg_match( '/<script\b[^>]*>.*?<\/script\s*>/is', $rest_of_content, $script_match, PREG_OFFSET_CAPTURE ) ) {
-        return $open_tag_end + $script_match[0][1] + strlen( $script_match[0][0] );
-    }
+$tags['form'] = [
+'action'     => true,
+'method'     => true,
+'id'         => true,
+'class'      => true,
+'style'      => true,
+'novalidate' => true,
+// onsubmit="return false;" verhindert im Original, dass ein Absenden ohne
+// JavaScript die Seite neu laedt. Falls KSES das Attribut dennoch
+// entfernt, bleibt das Formular funktionsfaehig -- die serverseitig
+// gesetzte Canonical verhindert, dass eine etwaige Query-URL indexiert wird.
+'onsubmit'   => true,
+'aria-label' => true,
+'data-*'     => true,
+];
 
-    return false;
+$tags['input'] = [
+'type'         => true,
+'name'         => true,
+'value'        => true,
+'placeholder'  => true,
+'id'           => true,
+'class'        => true,
+'style'        => true,
+'required'     => true,
+'readonly'     => true,
+'disabled'     => true,
+'checked'      => true,
+'maxlength'    => true,
+'minlength'    => true,
+'min'          => true,
+'max'          => true,
+'step'         => true,
+'pattern'      => true,
+'autocomplete' => true,
+'inputmode'    => true,
+'aria-label'   => true,
+'data-*'       => true,
+];
+
+$tags['textarea'] = [
+'name'         => true,
+'placeholder'  => true,
+'rows'         => true,
+'cols'         => true,
+'id'           => true,
+'class'        => true,
+'style'        => true,
+'required'     => true,
+'readonly'     => true,
+'disabled'     => true,
+'maxlength'    => true,
+'autocomplete' => true,
+'aria-label'   => true,
+'data-*'       => true,
+];
+
+$tags['select'] = [
+'name'       => true,
+'id'         => true,
+'class'      => true,
+'style'      => true,
+'required'   => true,
+'multiple'   => true,
+'disabled'   => true,
+'aria-label' => true,
+'data-*'     => true,
+];
+
+$tags['option'] = [
+'value'    => true,
+'selected' => true,
+'disabled' => true,
+'label'    => true,
+];
+
+$tags['label'] = [
+'for'   => true,
+'id'    => true,
+'class' => true,
+'style' => true,
+];
+
+return $tags;
 }
 
 function hs_prerender_write_snapshot( WP_REST_Request $req ) {
-    $url  = esc_url_raw( $req->get_param( 'url' ) );
-    $html = (string) $req->get_param( 'html' );
+$url  = esc_url_raw( $req->get_param( 'url' ) );
+$html = (string) $req->get_param( 'html' );
 
-    if ( trim( $html ) === '' ) {
-        return new WP_Error( 'empty_html', 'Leerer HTML-Inhalt uebergeben.', [ 'status' => 400 ] );
-    }
+if ( trim( $html ) === '' ) {
+return new WP_Error( 'empty_html', 'Leerer HTML-Inhalt uebergeben.', [ 'status' => 400 ] );
+}
 
-    $post_id = hs_prerender_resolve_post_id( $url );
-    if ( ! $post_id ) {
-        $debug_parsed = wp_parse_url( $url );
-        $debug_path = isset( $debug_parsed['path'] ) ? $debug_parsed['path'] : '(kein Pfad)';
+$post_id = hs_prerender_resolve_post_id( $url );
+if ( ! $post_id ) {
+return new WP_Error( 'not_found', 'Keine WP-Seite fuer URL "' . $url . '" gefunden.', [ 'status' => 404 ] );
+}
 
-        error_log(
-            'HS SNAPSHOT DEBUG'
-            . ' | request_url=' . $url
-            . ' | post_id=0'
-            . ' | resolved_path=' . $debug_path
-            . ' | result=not_found'
-        );
+$post = get_post( $post_id );
+if ( ! $post ) {
+return new WP_Error( 'not_found', 'Post-ID ' . $post_id . ' existiert nicht.', [ 'status' => 404 ] );
+}
 
-        return new WP_Error(
-            'not_found',
-            'Keine WP-Seite fuer URL "' . $url . '" gefunden.',
-            [ 'status' => 404 ]
-        );
-    }
+// SICHERHEITSNETZ (v1.2): Die Sprache des Ziel-Posts MUSS zur Sprache der URL
+// passen. Ohne diese Pruefung meldet der Writeback Erfolg, waehrend er die
+// falsche Sprachversion ueberschreibt -- genau das ist bei biathlon, skeleton
+// und snowboard passiert. Lieber ein sichtbarer Fehler im Action-Log als ein
+// stiller Datenverlust.
+$expected_lang = hs_prerender_lang_from_url( $url );
+if ( $expected_lang ) {
+$details     = apply_filters( 'wpml_post_language_details', null, $post_id );
+$actual_lang = ( is_array( $details ) && ! empty( $details['language_code'] ) )
+? (string) $details['language_code']
+: '';
 
-    $post = get_post( $post_id );
-    if ( ! $post ) {
-        return new WP_Error(
-            'not_found',
-            'Post-ID ' . $post_id . ' existiert nicht.',
-            [ 'status' => 404 ]
-        );
-    }
+if ( $actual_lang && $actual_lang !== $expected_lang ) {
+return new WP_Error(
+'lang_mismatch',
+sprintf(
+'Sprachkonflikt: URL "%s" erwartet Sprache "%s", aufgeloeste Post-ID %d hat aber "%s". Abbruch, um das Ueberschreiben der falschen Sprachversion zu verhindern.',
+$url,
+$expected_lang,
+$post_id,
+$actual_lang
+),
+[ 'status' => 409 ]
+);
+}
+}
 
-    // TEMP DEBUG-ONLY: prueft Resolver und Metadaten, schreibt nichts.
-    if ( $html === '<p>__HS_DEBUG_ONLY__</p>' ) {
-        error_log(
-            'HS SNAPSHOT DEBUG-ONLY'
-            . ' | request_url=' . $url
-            . ' | post_id=' . $post_id
-            . ' | title=' . $post->post_title
-            . ' | slug=' . $post->post_name
-            . ' | status=' . $post->post_status
-        );
+$content = $post->post_content;
 
-        return [
-            'ok'         => true,
-            'debug_only' => true,
-            'post_id'    => $post_id,
-            'title'      => $post->post_title,
-            'slug'       => $post->post_name,
-            'status'     => $post->post_status,
-        ];
-    }
+// Oeffnendes hs-root-Tag finden (Attribute wie data-type/data-bundle erhalten).
+if ( ! preg_match( '/<div\s+id=["\']hs-root["\']([^>]*)>/i', $content, $open_match, PREG_OFFSET_CAPTURE ) ) {
+return new WP_Error( 'no_hs_root', 'Kein <div id="hs-root"> in dieser Seite gefunden -- Provisioner-Shell fehlt.', [ 'status' => 422 ] );
+}
 
-    $content = $post->post_content;
+$open_tag_full = $open_match[0][0];
+$open_tag_end  = $open_match[0][1] + strlen( $open_tag_full );
 
-    // TEMP DEBUG: nur zur Diagnose; nach Abschluss der Tests entfernen.
-    $debug_lang = has_filter( 'wpml_element_language_code' )
-        ? apply_filters( 'wpml_element_language_code', null, [
-            'element_id'   => $post_id,
-            'element_type' => 'post_page',
-        ] )
-        : '(WPML nicht verfuegbar)';
+// v1.3: Das schliessende </div> von #hs-root per Tiefenzaehlung bestimmen,
+// statt einen <script>-Block als Endmarke zu benoetigen.
+//
+// WARUM: Der bisherige Anker <script></script> war nach dem ERSTEN
+// erfolgreichen Writeback verschwunden. Ursache ist nicht die Ersetzung
+// selbst, sondern wp_update_post(): Der REST-Aufruf laeuft ohne
+// angemeldeten Benutzer, damit ohne die Faehigkeit "unfiltered_html" --
+// WordPress entfernt beim Speichern per KSES alle <script>-Tags aus dem
+// post_content. Der Anker konnte also gar nicht ueberleben, und jede Seite
+// war nach dem ersten Durchlauf dauerhaft blockiert ("HTTP 422: Kein
+// vollstaendiger <script>-Tag nach #hs-root gefunden").
+//
+// Die Tiefenzaehlung braucht ueberhaupt keinen Anker: Sie findet das zum
+// oeffnenden <div id="hs-root"> gehoerende </div>, indem sie oeffnende und
+// schliessende div-Tags mitzaehlt. Das funktioniert beliebig oft
+// wiederholbar, weil der Snapshot vom Browser serialisiert und damit
+// garantiert ausbalanciert ist.
+$close_offset = hs_prerender_find_matching_div_close( $content, $open_tag_end );
+if ( $close_offset === null ) {
+return new WP_Error(
+'unbalanced_markup',
+'Kein passendes </div> fuer #hs-root gefunden (unausbalanciertes Markup) -- Ersetzung abgebrochen (Sicherheitsnetz).',
+[ 'status' => 422 ]
+);
+}
 
-    $debug_has_root = stripos( $content, 'id="hs-root"' ) !== false
-        || stripos( $content, "id='hs-root'" ) !== false;
-    $debug_has_script = preg_match( '/<script\b[^>]*>.*?<\/script\s*>/is', $content );
-    $debug_hs_root_count = preg_match_all( '/id=["\']hs-root["\']/i', $content );
+// Alles VOR dem Inhalt und alles NACH dem schliessenden </div> bleibt
+// unveraendert -- inklusive weiterer WP-Bloecke hinter dem Container.
+$before      = substr( $content, 0, $open_tag_end );
+$after       = substr( $content, $close_offset );
+$new_content = $before . $html . $after;
 
-    error_log(
-        'HS SNAPSHOT DEBUG'
-        . ' | request_url=' . $url
-        . ' | post_id=' . $post_id
-        . ' | title=' . $post->post_title
-        . ' | slug=' . $post->post_name
-        . ' | status=' . $post->post_status
-        . ' | wpml_lang=' . ( $debug_lang ?: '(leer)' )
-        . ' | has_hs_root=' . ( $debug_has_root ? 'yes' : 'no' )
-        . ' | hs_root_count=' . $debug_hs_root_count
-        . ' | has_complete_script=' . ( $debug_has_script ? 'yes' : 'no' )
-    );
+// v1.4: Formular-Tags nur fuer diesen einen Speichervorgang zulassen.
+add_filter( 'wp_kses_allowed_html', 'hs_prerender_allow_form_tags', 10, 2 );
 
-    // Oeffnendes hs-root-Tag finden (Attribute wie data-type/data-bundle erhalten).
-    if ( ! preg_match( '/<div\s+id=["\']hs-root["\']([^>]*)>/i', $content, $open_match, PREG_OFFSET_CAPTURE ) ) {
-        return new WP_Error( 'no_hs_root', 'Kein <div id="hs-root"> in dieser Seite gefunden -- Provisioner-Shell fehlt.', [ 'status' => 422 ] );
-    }
+$update = wp_update_post( [
+'ID'           => $post_id,
+'post_content' => $new_content,
+], true );
 
-    $open_tag_full  = $open_match[0][0];
-    $open_tag_start = $open_match[0][1];
-    $open_tag_end   = $open_tag_start + strlen( $open_tag_full );
+// Filter sofort wieder entfernen -- auch im Fehlerfall, deshalb VOR der
+// Fehlerauswertung.
+remove_filter( 'wp_kses_allowed_html', 'hs_prerender_allow_form_tags', 10 );
 
-    // v1.3 FIX: primaer robuste Div-Tiefenzaehlung nutzen, um das
-    // tatsaechliche Ende von #hs-root zu finden -- unabhaengig von
-    // wp:html-Kommentaren oder <script>-Tags. Nur wenn das aus
-    // irgendeinem Grund kein ausgeglichenes Ergebnis liefert, auf die
-    // Kommentar-/Script-basierte Fallback-Suche zurueckfallen.
-    $anchor_start_absolute = hs_prerender_find_hs_root_close( $content, $open_tag_end );
+if ( is_wp_error( $update ) ) {
+return new WP_Error( 'update_failed', $update->get_error_message(), [ 'status' => 500 ] );
+}
 
-    if ( $anchor_start_absolute === false ) {
-        $anchor_start_absolute = hs_prerender_find_fallback_anchor( $content, $open_tag_end );
-    }
+update_post_meta( $post_id, '_hs_last_snapshot_at', current_time( 'mysql' ) );
+update_post_meta( $post_id, '_hs_last_snapshot_url', $url );
 
-    if ( $anchor_start_absolute === false ) {
-        return new WP_Error(
-            'no_safety_anchor',
-            'Konnte das Ende von #hs-root weder ueber Div-Tiefenzaehlung noch ueber wp:html-/<script>-Fallback ermitteln -- Ersetzung abgebrochen (Sicherheitsnetz).',
-            [ 'status' => 422 ]
-        );
-    }
-
-    // Nur den bisherigen #hs-root-Inhalt ersetzen. Alles ab dem
-    // ermittelten Anker (Script-Block, Folgeinhalte etc.) bleibt erhalten.
-    $before = substr( $content, 0, $open_tag_end );
-    $after  = substr( $content, $anchor_start_absolute );
-    $new_content = $before . $html . '</div>' . $after;
-
-    $update = wp_update_post( [
-        'ID'           => $post_id,
-        'post_content' => $new_content,
-    ], true );
-
-    if ( is_wp_error( $update ) ) {
-        return new WP_Error( 'update_failed', $update->get_error_message(), [ 'status' => 500 ] );
-    }
-
-    update_post_meta( $post_id, '_hs_last_snapshot_at', current_time( 'mysql' ) );
-    update_post_meta( $post_id, '_hs_last_snapshot_url', $url );
-
-    return [
-        'ok'      => true,
-        'post_id' => $post_id,
-        'url'     => $url,
-        'title'   => get_the_title( $post_id ),
-    ];
+return [
+'ok'      => true,
+'post_id' => $post_id,
+'url'     => $url,
+'title'   => get_the_title( $post_id ),
+];
 }
