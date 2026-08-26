@@ -673,7 +673,7 @@ renderSubTextSeparator(b, g) +
         var logosHtml = "";
         for (var li = 1; li <= secMaxLogos[gi]; li++) {
           var lv = g["partnerssection" + secNum + "logo" + li] || "";
-          if (lv) logosHtml += '<img class="hs-gslot-logo" src="' + lv + '" alt="" loading="lazy">';
+          if (lv) logosHtml += '<img class="hs-gslot-logo" src="' + lv + '" alt="' + hsLogoAlt(lv) + '" loading="lazy">';
         }
         if (logosHtml) groupsHtml +=
           '<div class="hs-gslot-brand-group">' +
@@ -1052,7 +1052,7 @@ setTxt(item.querySelector('.faq-desc'), fillPlaceholders(g['faq' + si + 'text'],
         var logosHtml = "";
         for (var li = 1; li <= secMaxLogos[gi]; li++) {
           var lv = g["partnerssection" + secNum + "logo" + li] || "";
-          if (lv) logosHtml += '<img class="hs-gslot-logo" src="' + lv + '" alt="" loading="lazy">';
+          if (lv) logosHtml += '<img class="hs-gslot-logo" src="' + lv + '" alt="' + hsLogoAlt(lv) + '" loading="lazy">';
         }
         if (logosHtml) groupsHtml +=
           '<div class="hs-gslot-brand-group">' +
@@ -1440,9 +1440,15 @@ items.push({
   // document.title bleibt bis auf Weiteres hier, weil der serverseitige
   // <title> noch aus dem WordPress-Seitentitel kommt. Sobald der Title
   // ebenfalls serverseitig gesetzt wird, kann auch das entfallen.
+  
+// Seit Subtask 6 setzt hs-seo-meta.php auch den <title> serverseitig ueber
+  // pre_get_document_title. Ein clientseitiges document.title wuerde ihn nur
+  // wieder ueberschreiben -- und zwar mit einem abweichenden Wert, weil hier
+  // zusaetzlich " Data API | HEIM:SPIEL" angehaengt wurde ("API & Widgets
+  // Data API"). Die Funktion bleibt als leerer Platzhalter bestehen, damit
+  // die beiden bestehenden Aufrufstellen unveraendert bleiben koennen.
   function injectSEO(opts) {
-    opts = opts || {};
-    if (opts.title) document.title = opts.title;
+    // Absichtlich leer -- alle SEO-Daten kommen serverseitig.
   }
 
 
@@ -1719,11 +1725,11 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
       if (descEl) descEl.textContent = item.text;
     });
 
-    // JSON-LD FAQPage neu injizieren, damit Suchmaschinen-Snapshot konsistent bleibt
-    if (seoOpts) {
-      seoOpts.faqItems = updatedFaqItems;
-      injectSEO(seoOpts);
-    }
+    // Kein erneutes JSON-LD noetig: Das FAQPage-Schema wird serverseitig aus
+    // dem gespeicherten Snapshot-Markup gelesen. Da die Schleife oben die
+    // sichtbaren FAQ-Panels VOR dem Snapshot-Writeback aktualisiert, enthaelt
+    // der Snapshot bereits die uebersetzten Texte -- Schema und sichtbarer
+    // Inhalt bleiben damit automatisch konsistent.
   }
 
   // ── Hero Cluster ──────────────────────────────────────────────────────────
@@ -2039,6 +2045,47 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
       displayLabel = c.federation + " " + c.competition_name;
     }
     return displayLabel + buildCompetitionSuffix(c);
+  }
+
+  // NEU: Alt-Texte fuer Partnerlogos aus dem General Index (Spalte
+  // "logoAltMap", Format wie statstranslations/genderTranslations:
+  //   "ard=ARD, zdf=ZDF, dfb=DFB – Deutscher Fussball-Bund"
+  // Der Schluessel wird aus dem Dateinamen abgeleitet, d.h.
+  // ".../ard_130x80_duplex.png" -> "ard". Unbekannte Dateien behalten
+  // bewusst alt="" -- ein falscher Markenname waere schlechter als ein
+  // leerer Alt-Text.
+  var hsLogoAltCache = null;
+  function hsLogoAltMap() {
+    if (hsLogoAltCache) return hsLogoAltCache;
+    var gi = window.hsGeneralIndexData || {};
+    var raw = String(gi.logoaltmap || "").trim();
+    var map = {};
+    if (raw) {
+      raw.split(",").forEach(function (pair) {
+        var i = pair.indexOf("=");
+        if (i === -1) return;
+        var key = pair.slice(0, i).trim().toLowerCase();
+        if (key) map[key] = pair.slice(i + 1).trim();
+      });
+    }
+    hsLogoAltCache = map;
+    return map;
+  }
+
+  function hsLogoAlt(url) {
+    var file = String(url || "").split("/").pop().split("?")[0];
+    var slug = file
+      .replace(/\.(png|jpe?g|webp|svg|gif)$/i, "")
+      .replace(/_\d+x\d+(_duplex)?$/i, "")
+      .toLowerCase();
+    // Escaping ist zwingend: Der Wert wird per String-Konkatenation in ein
+    // HTML-Attribut geschrieben. Aktuell enthaelt kein Markenname kritische
+    // Zeichen, aber ein spaeter ergaenztes "AT&T" wuerde das Attribut sonst
+    // zerlegen.
+    return (hsLogoAltMap()[slug] || "")
+      .replace(/&/g, "&amp;")
+      .replace(/"/g, "&quot;")
+      .replace(/</g, "&lt;");
   }
 
 // NEU: Gender-Suffix-Uebersetzungen aus dem General Index (Spalte
