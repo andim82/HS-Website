@@ -2140,7 +2140,12 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
 
     function buildCountryCard(c) {
       var panelId = "hs-cc-panel-" + bundleKey + "-" + (panelIdxCounter++);
-      window.hsCompetitionPanelData[panelId] = { competitions: c.topCompetitions || [], groupLabel: c._displayName, topCount: c.topCompetitionsCount || 0 };
+      // countryIso zusaetzlich merken: Die Wettbewerbszeilen des Coverage-
+      // Endpoints tragen selbst KEIN country_iso, das Land steht nur auf der
+      // Gruppe. Der Panel-Renderer erkennt hieran, dass es eine Laendergruppe
+      // ist, und laesst die Zeilen-Icons weg -- die Flagge steht bereits im
+      // Kachelkopf darueber.
+      window.hsCompetitionPanelData[panelId] = { competitions: c.topCompetitions || [], groupLabel: c._displayName, topCount: c.topCompetitionsCount || 0, countryIso: c.country_iso || "" };
       return (
         '<div class="hs-tc-card-wrap">' +
           '<button type="button" class="hs-card hs-card-compact hs-tc-card fade-in" ' +
@@ -2155,7 +2160,9 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
     }
     function buildFedCard(i) {
       var panelId = "hs-cc-panel-" + bundleKey + "-" + (panelIdxCounter++);
-      window.hsCompetitionPanelData[panelId] = { competitions: i.topCompetitions || [], groupLabel: i.federation, topCount: i.topCompetitionsCount || 0 };
+      // Foederationen wie UEFA, FIFA oder CAF haben bewusst kein Land --
+      // dort bleibt der Globus die richtige Anzeige.
+      window.hsCompetitionPanelData[panelId] = { competitions: i.topCompetitions || [], groupLabel: i.federation, topCount: i.topCompetitionsCount || 0, countryIso: "" };
       return (
         '<div class="hs-tc-card-wrap">' +
           '<button type="button" class="hs-card hs-card-compact hs-tc-card fade-in" ' +
@@ -2438,7 +2445,9 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
         if (seen[dk]) continue;
         seen[dk] = true;
 
-        var flagHtml = flagIconHtml(c.country_iso, label);
+        var flagHtml = (!c.country_iso && (data.countryIso || ""))
+        ? ""
+        : flagIconHtml(c.country_iso, label);
 
         rows.push(
           '<tr class="hs-event-row">' +
@@ -2480,6 +2489,11 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
     var g = window.hsGeneralIndexData || {};
     var comps = data.competitions || [];
     var topCount = typeof data.topCount === "number" ? data.topCount : 0;
+    // Land der Gruppe. Wird in compRowHtml() ausgewertet, um in Laender-Panels
+    // auf Zeilen-Icons zu verzichten. FEHLTE zuvor, obwohl compRowHtml() sie
+    // liest -- unter "use strict" ein ReferenceError, der den ganzen
+    // Panel-Aufbau abbrach.
+    var panelCountryIso = data.countryIso || "";
 
     var labelMatches = (g.labelmatches || "Matches");
     var labelLiveScores = (g.labellivescores || "Live Scores");
@@ -2519,7 +2533,15 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
       if (c.name) displayLabel += buildCompetitionSuffix(c);
       // Ohne Bedingung, damit Zeilen ohne Land den Globus bekommen und die
       // Namen aller Zeilen auf derselben Kante beginnen.
-      var flagHtml = flagIconHtml(c.country_iso, displayLabel);
+      // Innerhalb einer Ländergruppe kein Icon: Die Flagge steht bereits im
+      // Kachelkopf darüber, in der Zeile waere sie reine Wiederholung -- im
+      // Deutschland-Panel 136 mal dieselbe. Ein zeilen-eigenes country_iso
+      // gewinnt trotzdem, falls es je welche gibt. Nur wenn weder Zeile noch
+      // Gruppe ein Land haben (Foederationen, internationale Bewerbe), liefert
+      // flagIconHtml() den Globus -- dort trägt das Icon echte Information.
+      var flagHtml = (!c.country_iso && panelCountryIso)
+        ? ""
+        : flagIconHtml(c.country_iso, displayLabel);
       // v101.15: data-labels nur fuer das Mobile-Card-Layout der aufgeklappten
       // Wettbewerbszeilen. Desktop bleibt unveraendert, da diese Attribute erst
       // in der Mobile-Media-Query visuell genutzt werden.
