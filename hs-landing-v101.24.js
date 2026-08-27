@@ -420,7 +420,13 @@ async function fetchSheetCSV(gid) {
       name: f(disc, "displayName", disc.name || ""),
       detail_url: disc.detailurl,
       total_events: totalEvents,
+      // ACHTUNG Namensfalle: liveticker_count enthaelt liveCompetitions, NICHT
+      // den Live-Ticker-Wert. Das bleibt so, weil renderClusterCards() und
+      // statBarValues darauf zugreifen -- ein Umbenennen waere hier riskanter
+      // als der irritierende Name.
       liveticker_count: liveCompetitions,
+      // NEU: der echte redaktionelle Live-Ticker-Wert, bisher nie aggregiert.
+      livetick_count: livetickCount,
     };
   })
 );
@@ -430,6 +436,18 @@ async function fetchSheetCSV(gid) {
 
 const totalEvents = disciplineData.reduce((s, d) => s + d.total_events, 0);
   const totalLive = disciplineData.reduce((s, d) => s + d.liveticker_count, 0);
+
+  // Echte Summe der redaktionellen Live-Ticker: 188 bei Wintersport.
+  // totalLive ist trotz seines Namens die Summe der Live-Wettbewerbe (373).
+  const totalLiveticker = disciplineData.reduce((s, d) => s + (d.livetick_count || 0), 0);
+
+  // Aufzaehlung der Sportarten fuer die neue FAQ, z.B. "Biathlon, Bob, ...
+  // und Snowboard". formatEnumeration() setzt "und" bzw. "and" sprachrichtig.
+  // Steht hier NACH der alphabetischen Sortierung, damit die Reihenfolge der
+  // Aufzaehlung zur Reihenfolge der Kacheln passt.
+  const sportsList = formatEnumeration(
+    disciplineData.map(function (d) { return d.name; }).filter(Boolean).join("\n")
+  );
 
   // Stats-Bar-Werte: im Coverage-Modus aus coverageData ableiten,
   // sonst unverändert wie bisher aus disciplineData.
@@ -593,9 +611,20 @@ renderCoverageSection(b, g) +
 	heroHeadline: f(b, "heroHeadline", bundleName),
         totalCompetitions: useCoverageMode ? ((coverageData && coverageData.totalCompetitions) || "") : disciplineData.length,
         totalCountries: useCoverageMode ? ((coverageData && coverageData.totalCountries) || "") : "",
-        livetickCount: isBundleTemplate ? ((bundleTotals && bundleTotals.livetickCount) || "") : (useCoverageMode ? ((f(b, "livetickCount", "") || (coverageData && coverageData.totalLiveTicker)) || 0) : totalLive),
-        liveCompetitions: isBundleTemplate ? ((bundleTotals && bundleTotals.liveCompetitions) || "") : (useCoverageMode ? (f(b, "liveCompetitions", "") || 0) : totalEvents),
+        // KORREKTUR: Im Disziplin-Cluster stand hier liveCompetitions = totalEvents
+        // (711, alle Events) und livetickCount = totalLive (373, die Live-
+        // Wettbewerbe). Die Live-FAQ haette damit "711 Live-Wettbewerbe, davon
+        // 373 mit Live-Ticker" behauptet -- beide Zahlen falsch. Richtig sind
+        // 373 Live-Wettbewerbe und 188 mit redaktionellem Live-Ticker.
+        // Die Zweige fuer Bundle- und Coverage-Seiten bleiben unveraendert.
+        livetickCount: isBundleTemplate ? ((bundleTotals && bundleTotals.livetickCount) || "") : (useCoverageMode ? ((f(b, "livetickCount", "") || (coverageData && coverageData.totalLiveTicker)) || 0) : totalLiveticker),
+        liveCompetitions: isBundleTemplate ? ((bundleTotals && bundleTotals.liveCompetitions) || "") : (useCoverageMode ? (f(b, "liveCompetitions", "") || 0) : totalLive),
         topLeagueNamesList: useCoverageMode ? buildTopLeagueNamesList(validTopCompetitions) : "",
+        // Neu fuer die Sportarten-FAQ. Auf Coverage-Seiten bewusst leer --
+        // daran haengt, dass die Frage nur auf Multisport-Clustern erscheint.
+        sportsCount: useCoverageMode ? "" : disciplineData.length,
+        sportsList: useCoverageMode ? "" : sportsList,
+        totalEvents: useCoverageMode ? "" : totalEvents,
         preEvent: formatEnumeration(f(b, "preEvent", "")),
         live: formatEnumeration(f(b, "live", "")),
         postEvent: formatEnumeration(f(b, "postEvent", "")),
@@ -1402,11 +1431,27 @@ setTxt(item.querySelector('.faq-desc'), fillPlaceholders(g['faq' + si + 'text'],
   // Erwartet Sheet-Spalten: seoFaqTpl1Headline/Text ... seoFaqTpl4Headline/Text
   // Jedes Template wird NUR gerendert, wenn ALLE benoetigten Variablen einen
   // nicht-leeren Wert haben (kein "undefined"/kaputter Text im Frontend).
+  // KORREKTUR der Zuordnung. Die geforderten Variablen passten nicht zu den
+  // Texten, die im Sheet unter derselben Nummer stehen:
+  //
+  //   Slot 2 verlangte topLeagueNamesList. Der Text dort fragt nach Live-Daten
+  //   und braucht nur liveCompetitions. Auf Disziplin-Clustern ist
+  //   topLeagueNamesList immer leer -- deshalb fehlte die Live-Frage dort ganz.
+  //
+  //   Slot 3 verlangte liveCompetitions und livetickCount. Der Text dort fragt
+  //   nach Statistiken und braucht displayName, preEvent und postEvent.
+  //
+  //   Slot 1 braucht zusaetzlich topLeagueNamesList: Beide Textzweige enden
+  //   auf "..., darunter {topLeagueNamesList}." Fehlt der Wert, stand dort
+  //   bisher "darunter ." mit leerer Aufzaehlung.
+  //
+  // Slot 4 ist neu und greift nur auf Multisport-Clustern, weil sportsList
+  // auf Coverage-Seiten leer bleibt.
   var SEO_FAQ_TEMPLATES = [
-    { n: 1, vars: ["totalCompetitions", "totalCountries"] },
-    { n: 2, vars: ["totalCompetitions", "topLeagueNamesList"] },
-    { n: 3, vars: ["liveCompetitions", "livetickCount"] },
-    { n: 4, vars: ["sportartName", "preEvent", "postEvent"] }
+    { n: 1, vars: ["totalCompetitions", "totalCountries", "topLeagueNamesList"] },
+    { n: 2, vars: ["liveCompetitions"] },
+    { n: 3, vars: ["displayName", "preEvent", "postEvent"] },
+    { n: 4, vars: ["sportsList", "totalEvents"] }
   ];
 
   function buildSeoFaqItems(g, vars) {
