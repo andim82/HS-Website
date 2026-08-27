@@ -2383,7 +2383,6 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
 
       panelEl.innerHTML =
         '<div class="hs-table-wrap"><table class="hs-events-table">' +
-          '<caption class="hs-tc-caption">' + caption + '</caption>' +
           theadHtml +
           '<tbody>' + rows.join("") + '</tbody>' +
         '</table></div>';
@@ -2490,7 +2489,6 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
 
     panelEl.innerHTML =
       '<div class="hs-table-wrap"><table class="hs-events-table">' +
-        '<caption class="hs-tc-caption">' + panelCaption + '</caption>' +
         theadHtml + bodyHtml +
       '</table></div>';
 
