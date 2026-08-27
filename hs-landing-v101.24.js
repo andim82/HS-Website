@@ -772,6 +772,10 @@ renderCoverageSection(b, g) +
     // Auto-Übersetzung der Competition-Namen (fire-and-forget, nur wenn pageLang != "de")
 var hsTranslationPromise = Promise.resolve(null);
 if (useCoverageMode) {
+  // Wird von hsPrerenderPanels() und hsRenderCompetitionPanel() fuer die
+  // Tabellen-Caption gebraucht, in beiden Faellen ausserhalb dieses Scopes.
+  window.hsSportDisplayName = f(b, "displayName", bundleName);
+
   var compNames = [];
   var seenCompName = {};
   function addCompName(n) {
@@ -805,7 +809,15 @@ if (useCoverageMode) {
       if (translations) window.hsCompTranslations = translations;
       finalizeCompetitionTranslations(translations, root, validTopCompetitions, seoVars, g, seoOpts);
       hsPatchCompetitionPreviews(root);
+      // Erst NACH den Uebersetzungen vorrendern, damit im englischen Snapshot
+      // "World Cup" steht und nicht "WM". hsMarkRenderComplete() haengt an
+      // .finally() derselben Promise, laeuft also garantiert danach -- der
+      // Prerender-Dienst wartet auf data-hs-rendered und bekommt damit den
+      // vollstaendigen Stand.
+      try { hsPrerenderPanels(root, g); } catch (e) { console.warn("[hs-landing] hsPrerenderPanels:", e); }
     });
+  } else {
+    try { hsPrerenderPanels(root, g); } catch (e) { console.warn("[hs-landing] hsPrerenderPanels:", e); }
   }
 }
 hsTranslationPromise.finally(hsMarkRenderComplete);
@@ -2266,6 +2278,120 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
    * bei Laender-/Foederations-Panels gezeigt (mehrere Wettbewerbe), NICHT
    * bei Top-Competition-Panels (dort ist immer nur 1 Wettbewerb enthalten).
    */
+  // ── Paket 3: Panels fuer den Snapshot vorrendern ───────────────────────────
+  // Die Wettbewerbstabellen entstehen bisher erst beim Klick. Fuer den Nutzer
+  // ist das genau richtig -- 1.271 Zeilen beim Seitenaufbau waeren Verschwendung.
+  // Der Prerender-Snapshot sieht dadurch aber NICHTS davon, und damit sieht auch
+  // Google nichts: gemessen waren 2 von 743 Wettbewerbsnamen im HTML.
+  //
+  // Diese Funktion legt deshalb in jedes noch leere Panel eine reduzierte, aber
+  // semantisch vollstaendige Tabelle: die kuratierten Top-Wettbewerbe der
+  // Gruppe, mit <caption>, ohne Statistik-Pills.
+  //
+  // Drei Punkte, die hier bewusst so sind:
+  //
+  // 1. dataset.hsRendered wird NICHT gesetzt. Beim Klick ersetzt
+  //    hsRenderCompetitionPanel() den Inhalt durch die vollstaendige Liste.
+  //    Das Panel ist bis dahin hidden (.hs-tc-panel[hidden]{display:none}), und
+  //    hsToggleCompetitionPanel() rendert synchron im selben Task neu -- der
+  //    Nutzer sieht die reduzierte Fassung also nie, auch nicht kurz.
+  //
+  // 2. KEINE fade-in-Klasse auf diesen Zeilen. Der IntersectionObserver laeuft
+  //    nur einmal beim Seitenload; fade-in-Elemente in einem hidden-Container
+  //    bekaemen nie die visible-Klasse und stuenden im Snapshot dauerhaft auf
+  //    opacity:0 -- genau der Fehler mit den 124 unsichtbaren Elementen.
+  //
+  // 3. Keine Statistik-Pills. 11.178 wiederholte Pill-Begriffe wuerden die
+  //    Boilerplate-Verwaesserung neu erzeugen, die wir gerade beseitigt haben.
+  //    Die leere Zelle bleibt, damit die Spaltenzahl zur vollen Tabelle passt.
+  //
+  // Kalkuliert: 401 Zeilen, 131 KB roh, 6,3 KB gzip, 4.710 DOM-Knoten.
+  // Auf 0 setzen heisst: nur kuratierte Gruppen (398 Zeilen).
+  var HS_PRERENDER_FALLBACK_ROWS = 3;
+
+  function hsPrerenderPanels(root, g) {
+    g = g || window.hsGeneralIndexData || {};
+    var store  = window.hsCompetitionPanelData || {};
+    var panels = (root || document).querySelectorAll(".hs-tc-panel[id]");
+    if (!panels.length) return;
+
+    var labelMatches    = (g.labelmatches      || "Matches");
+    var labelLiveScores = (g.labellivescores   || "Live Scores");
+    var labelLiveTicker = (g.labellivetickcol  || "Liveticker");
+    var labelStats      = (g.labelstatscol     || "Statistiken");
+    var labelOnRequest  = (g.labelonrequest    || "Auf Anfrage");
+    var captionTpl      = (g.panelcaption      || "{group} \u2013 {displayName}");
+    var sportLabel      = (window.hsSportDisplayName || "");
+
+    var theadHtml =
+      '<thead><tr>' +
+        '<th class="hs-tc-th-name"></th>' +
+        '<th class="hs-tc-th-stats">' + labelStats + '</th>' +
+        '<th class="hs-tc-col-num hs-tc-th-num">' + labelMatches + '</th>' +
+        '<th class="hs-tc-col-num hs-tc-th-num">' + labelLiveScores + '</th>' +
+        '<th class="hs-tc-col-num hs-tc-th-num">' + labelLiveTicker + '</th>' +
+      '</tr></thead>';
+
+    panels.forEach(function(panelEl) {
+      if (panelEl.dataset.hsRendered === "1") return;
+      if (panelEl.dataset.hsPrerendered === "1") return;
+
+      var data  = store[panelEl.id];
+      var comps = (data && data.competitions) ? data.competitions : [];
+      if (!comps.length) return;
+
+      var take = (data.topCount > 0) ? data.topCount : HS_PRERENDER_FALLBACK_ROWS;
+
+      var rows = [];
+      var seen = {};
+      for (var pi = 0; pi < comps.length && rows.length < take; pi++) {
+        var c = comps[pi];
+        var base = String((c && c.name) || "").trim();
+        if (!base) continue;
+
+        var label = hsTranslateCompName(base) + buildCompetitionSuffix(c);
+
+        // Dedup innerhalb des Panels: gleicher Name UND gleicher Suffix.
+        // Die Gender-Varianten (Bundesliga male / Bundesliga female) bleiben
+        // dadurch korrekt als zwei getrennte Zeilen erhalten.
+        var dk = label.toLowerCase();
+        if (seen[dk]) continue;
+        seen[dk] = true;
+
+        var flagHtml = c.country_iso ? flagIconHtml(c.country_iso, label) : "";
+
+        rows.push(
+          '<tr class="hs-event-row">' +
+            '<td class="hs-event-name"><span class="hs-event-name-inner">' + flagHtml + label + '</span></td>' +
+            '<td class="hs-event-stats"></td>' +
+            '<td class="hs-tc-col-num" data-label="' + labelMatches + '">' + (c.seasonMatches || 0) + '</td>' +
+            '<td class="hs-tc-col-num" data-label="' + labelLiveScores + '">' + (c.liveScores || 0) + '</td>' +
+            '<td class="hs-tc-col-num" data-label="' + labelLiveTicker + '">' +
+              (c.liveTicker > 0
+                ? '<span class="hs-lt-yes">\u2713</span>'
+                : '<span class="hs-lt-no">' + labelOnRequest + '</span>') +
+            '</td>' +
+          '</tr>'
+        );
+      }
+
+      if (!rows.length) return;
+
+      var caption = String(captionTpl)
+        .split("{group}").join((data && data.groupLabel) || "")
+        .split("{displayName}").join(sportLabel);
+
+      panelEl.innerHTML =
+        '<div class="hs-table-wrap"><table class="hs-events-table">' +
+          '<caption class="hs-tc-caption">' + caption + '</caption>' +
+          theadHtml +
+          '<tbody>' + rows.join("") + '</tbody>' +
+        '</table></div>';
+
+      panelEl.dataset.hsPrerendered = "1";
+    });
+  }
+
   window.hsRenderCompetitionPanel = function(panelEl, panelId) {
     if (!panelEl || panelEl.dataset.hsRendered === "1") return;
     var data = (window.hsCompetitionPanelData || {})[panelId];
@@ -2355,8 +2481,18 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
       bodyHtml = '<tbody>' + comps.map(compRowHtml).join("") + '</tbody>';
     }
 
+    // Die Caption muss auch hier stehen, sonst verschwindet die Ueberschrift
+    // beim Aufklappen wieder -- die vorgerenderte Fassung wird ja komplett
+    // ersetzt.
+    var panelCaption = String(g.panelcaption || "{group} \u2013 {displayName}")
+      .split("{group}").join(data.groupLabel || "")
+      .split("{displayName}").join(window.hsSportDisplayName || "");
+
     panelEl.innerHTML =
-      '<div class="hs-table-wrap"><table class="hs-events-table">' + theadHtml + bodyHtml + '</table></div>';
+      '<div class="hs-table-wrap"><table class="hs-events-table">' +
+        '<caption class="hs-tc-caption">' + panelCaption + '</caption>' +
+        theadHtml + bodyHtml +
+      '</table></div>';
 
     // BUGFIX: Dynamisch nachtraeglich eingefuegte .fade-in-Zeilen werden vom
     // globalen IntersectionObserver (der nur einmal beim initialen Seitenload
