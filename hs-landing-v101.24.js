@@ -771,12 +771,40 @@ renderCoverageSection(b, g) +
 
     // Auto-Übersetzung der Competition-Namen (fire-and-forget, nur wenn pageLang != "de")
 var hsTranslationPromise = Promise.resolve(null);
-if (useCoverageMode && hasTopCompetitions) {
+if (useCoverageMode) {
   var compNames = [];
-  validTopCompetitions.forEach(function(c){ if(c) compNames.push(c.competition_name); });
+  var seenCompName = {};
+  function addCompName(n) {
+    var s = String(n || "").trim();
+    if (!s || seenCompName[s]) return;
+    seenCompName[s] = true;
+    compNames.push(s);
+  }
+
+  // Bisher wurden ausschliesslich die vier Top-Wettbewerbe angemeldet. Deshalb
+  // blieben die Namen in der Laender- und Foederationsliste unuebersetzt --
+  // auf der englischen Seite stand "WM" statt "World Cup".
+  validTopCompetitions.forEach(function(c){ if (c) addCompName(c.competition_name); });
+
+  // NEU: alle Wettbewerbsnamen der Coverage-Antwort, also auch die 1.065
+  // Eintraege in den Panels.
+  //
+  // Die Statistik-Schluessel bleiben bewusst aussen vor: Das sind technische
+  // Feldnamen des Datenlieferanten (ball_win_removed_opponents), bei denen eine
+  // KI-Uebersetzung nur Ungenauigkeit erzeugt. Zustaendig ist dafuer das
+  // Sheet-Feld statsTranslations.
+  if (coverageData) {
+    [].concat(coverageData.countries || [], coverageData.international || [])
+      .forEach(function(grp) {
+        (grp.topCompetitions || []).forEach(function(c) { if (c) addCompName(c.name); });
+      });
+  }
+
   if (compNames.length) {
     hsTranslationPromise = translateCompetitions(compNames, pageLang, normalizedBundleKey).then(function(translations){
+      if (translations) window.hsCompTranslations = translations;
       finalizeCompetitionTranslations(translations, root, validTopCompetitions, seoVars, g, seoOpts);
+      hsPatchCompetitionPreviews(root);
     });
   }
 }
@@ -1695,11 +1723,56 @@ items.push({
     var uniqueNames = Array.from(new Set(names.filter(Boolean)));
     if (!uniqueNames.length) return null;
 
-    var cacheKey = "comp_" + bundleKey;
+        // Ein gemeinsamer Schluessel fuer alle Sportarten statt einer pro Bundle.
+    // Generische Begriffe wie "Pokal", "Freundschaft" oder "WM" kommen in
+    // mehreren Sportarten vor und wurden bisher je Bundle erneut uebersetzt --
+    // mit dem Risiko unterschiedlicher Schreibweisen auf verschiedenen Seiten.
+    var cacheKey = "comp_all";
     var stored = await fetchStoredTranslations(targetLang, cacheKey);
     var missing = uniqueNames.filter(function(s) { return !(s in stored); });
     if (missing.length) queueMissingTranslations(targetLang, cacheKey, missing);
     return stored;
+  }
+
+// ── Uebersetzung einzelner Wettbewerbsnamen ───────────────────────────────
+  // Exakter Nachschlag, bewusst OHNE die Teilstring-Suche aus
+  // applyCompetitionTranslations(): Bei rund 1.100 Eintraegen in der Map waere
+  // das pro Element ein Durchlauf ueber alle Schluessel -- bei bis zu 1.065
+  // Panel-Zeilen also ueber eine Million Vergleiche.
+  function hsTranslateCompName(name) {
+    var map = window.hsCompTranslations;
+    if (!map || !name) return name;
+    return map[name] || name;
+  }
+
+  // Baut die Kachel-Vorschau ("Bundesliga, DFB-Pokal …") neu auf, sobald die
+  // Uebersetzungen eingetroffen sind. Die Originaldaten liegen schon in
+  // window.hsCompetitionPanelData und sind ueber aria-controls mit der Kachel
+  // verknuepft -- es braucht also keine Zwischenspeicherung im Markup.
+  function hsPatchCompetitionPreviews(root) {
+    var scope = root || document;
+    scope.querySelectorAll(".hs-card-footer-names").forEach(function(el) {
+      var wrap = el.closest(".hs-tc-card-wrap");
+      var btn  = wrap ? wrap.querySelector("[aria-controls]") : null;
+      var data = btn ? (window.hsCompetitionPanelData || {})[btn.getAttribute("aria-controls")] : null;
+      var comps = (data && data.competitions) ? data.competitions : [];
+      if (!comps.length) return;
+
+      var names = [];
+      var seen  = {};
+      for (var pi = 0; pi < comps.length && names.length < 2; pi++) {
+        var base = String((comps[pi] && comps[pi].name) || "").trim();
+        if (!base) continue;
+        var pk = base.toLowerCase();
+        if (seen[pk]) continue;
+        seen[pk] = true;
+        names.push(hsTranslateCompName(base) + buildCompetitionSuffix(comps[pi]));
+      }
+
+      if (names.length) {
+        el.textContent = names.join(", ") + (comps.length > names.length ? " \u2026" : "");
+      }
+    });
   }
 
   function applyCompetitionTranslations(translations, root) {
@@ -2233,7 +2306,7 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
       // -- buildCompetitionDisplayLabel() ist fuer die GLOBALEN topCompetitions
       // gedacht und lieferte hier immer "" zurueck. Fallback-Kette deckt beide
       // Datenformen ab (Top-Competition-Kachel vs. Laender-/Foederations-Kachel).
-      var displayLabel = (c.name || buildCompetitionDisplayLabel(c) || "");
+      var displayLabel = (c.name ? hsTranslateCompName(c.name) : (buildCompetitionDisplayLabel(c) || ""));
       // NEU (v101.6): Falls displayLabel ueber c.name (Laender-/Foederations-Struktur)
       // ermittelt wurde, ist der Gender/Age-Suffix aus buildCompetitionDisplayLabel()
       // NICHT enthalten (die Funktion wird in diesem Zweig gar nicht durchlaufen) --
