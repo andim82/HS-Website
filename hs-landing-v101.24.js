@@ -628,8 +628,18 @@ renderCoverageSection(b, g) +
         preEvent: formatEnumeration(f(b, "preEvent", "")),
         live: formatEnumeration(f(b, "live", "")),
         postEvent: formatEnumeration(f(b, "postEvent", "")),
-        isBundleTemplate: isBundleTemplate,
-        isNotBundleTemplate: !isBundleTemplate,
+                // ACHTUNG: Diese beiden Flags steuern AUSSCHLIESSLICH die Formulierung
+        // in den FAQ-Texten. Die echte Konstante isBundleTemplate bleibt
+        // unberuehrt -- an ihr haengen die Struktur-Weiche, statBarValues und
+        // die Zweige weiter oben in diesem Objekt. Sie umzuschalten wuerde die
+        // Wintersport-Seite auf das Bundle-Template umleiten.
+        //
+        // Fuer die Formulierung ist nicht entscheidend, ob ein Bundle vorliegt,
+        // sondern ob die Zahlen Events oder Wettbewerbe zaehlen. Beim
+        // Multisport-Cluster sind es Events: 711 Events, 373 davon live.
+        // "373 competitions live" waere sachlich falsch.
+        isBundleTemplate: isBundleTemplate || rawClusterTemplate === "multisport",
+        isNotBundleTemplate: !(isBundleTemplate || rawClusterTemplate === "multisport"),
         eyebrow: f(b, "eyebrow", ""),
         name: f(b, "name", ""),
  	  bundleName: bundleName,
@@ -1053,14 +1063,25 @@ setTxt(item.querySelector('.faq-desc'), fillPlaceholders(g['faq' + si + 'text'],
 		displayName: f(disc, "displayName", disc.name),
 		sportEyebrow: f(disc, "sportEyebrow", ""),
 		heroHeadline: f(disc, "heroHeadline", f(disc, "displayName", disc.name)), 
-        totalCompetitions: totalEvents,
+                totalCompetitions: totalEvents,
         totalCountries: "",
         livetickCount: livetickCount,
-        liveCompetitions: totalEvents,
+        // KORREKTUR: Hier stand totalEvents. Bei Biathlon sind das 73, also
+        // alle Events -- nicht die live erfassten. Der richtige Wert 42 wird
+        // oben aus disc.livecompetitions bereits ermittelt und war ungenutzt.
+        liveCompetitions: liveCompetitions,
         topLeagueNamesList: "",
         preEvent: formatEnumeration(f(disc, "preEvent", "")),
         live: formatEnumeration(f(disc, "live", "")),
-        postEvent: formatEnumeration(f(disc, "postEvent", ""))
+        postEvent: formatEnumeration(f(disc, "postEvent", "")),
+        // NEU: Diese drei Schluessel fehlten hier komplett. Ohne eyebrow blieb
+        // "{eyebrow}" als Literal im Satz stehen, und ohne die beiden Flags
+        // entfernte applyConditionalBlocks() beide Zweige, sodass das
+        // Substantiv fehlte. Detailseiten des Multisport-Templates zaehlen
+        // ebenfalls Events, nicht Wettbewerbe.
+        eyebrow: f(disc, "eyebrow", ""),
+        isBundleTemplate: (String(disc.detailtemplate || "").toLowerCase() === "multisport"),
+        isNotBundleTemplate: !(String(disc.detailtemplate || "").toLowerCase() === "multisport")
       };
       whyFaqItems = buildWhyFaqItems(g, seoVars);
 
@@ -1448,8 +1469,12 @@ setTxt(item.querySelector('.faq-desc'), fillPlaceholders(g['faq' + si + 'text'],
   // Slot 4 ist neu und greift nur auf Multisport-Clustern, weil sportsList
   // auf Coverage-Seiten leer bleibt.
   var SEO_FAQ_TEMPLATES = [
-    { n: 1, vars: ["totalCompetitions", "totalCountries", "topLeagueNamesList"] },
-    { n: 2, vars: ["liveCompetitions"] },
+    // eyebrow gehoert in beide Bedingungen: Die Texte von Slot 1 und 2 beginnen
+    // mit "{eyebrow}". Fehlt der Wert, stand dort die geschweifte Klammer im
+    // fertigen Satz. Auf Detailseiten ist eyebrow im Sheet leer -- dort bleibt
+    // die Live-Frage damit aus, statt fehlerhaft zu erscheinen.
+    { n: 1, vars: ["eyebrow", "totalCompetitions", "totalCountries", "topLeagueNamesList"] },
+    { n: 2, vars: ["eyebrow", "liveCompetitions"] },
     { n: 3, vars: ["displayName", "preEvent", "postEvent"] },
     { n: 4, vars: ["sportsList", "totalEvents"] }
   ];
