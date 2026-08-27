@@ -2057,7 +2057,13 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
 
   function flagIconHtml(iso, name) {
     var resolvedIso = resolveFlagIso(iso, name);
-    if (!resolvedIso) return "";
+    // Kein Land zuordenbar (FIFA WM, UEFA Champions League, Foederationen):
+    // Globus statt Leerstelle. Vorher stand hier "" -- die Beschriftung begann
+    // dann direkt am Rand und stand versetzt zu den Kacheln mit Flagge.
+    // Einfaerbung per CSS, siehe .hs-flag-globe in hs-landing.css.
+    if (!resolvedIso) {
+      return '<span class="hs-flag-globe" aria-hidden="true"></span>';
+    }
     return '<span class="hs-flag-round" style="background-image:url(\'https://flagcdn.com/w80/' + resolvedIso.toLowerCase() + '.png\')" aria-hidden="true"></span>';
   }
 
@@ -2421,14 +2427,18 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
 
         var label = hsTranslateCompName(base) + buildCompetitionSuffix(c);
 
-        // Dedup innerhalb des Panels: gleicher Name UND gleicher Suffix.
-        // Die Gender-Varianten (Bundesliga male / Bundesliga female) bleiben
-        // dadurch korrekt als zwei getrennte Zeilen erhalten.
-        var dk = label.toLowerCase();
+        // Dedup ueber compId statt ueber die Beschriftung. 69 der 1.065 Zeilen
+        // tragen innerhalb ihrer Gruppe eine nicht eindeutige Beschriftung --
+        // FIFA fuehrt zehn Zeilen "Freundschaft", UEFA vier Zeilen "EM", weil
+        // dort das Feld age leer ist. Ein Dedup nach Beschriftung wuerde diese
+        // Zeilen stillschweigend verwerfen, sobald sie in den kuratierten Teil
+        // rutschen. Die compId ist eindeutig; nur wenn sie fehlt, dient die
+        // Beschriftung als Notschluessel.
+        var dk = String(c.compId || "").trim() || ("lbl:" + label.toLowerCase());
         if (seen[dk]) continue;
         seen[dk] = true;
 
-        var flagHtml = c.country_iso ? flagIconHtml(c.country_iso, label) : "";
+        var flagHtml = flagIconHtml(c.country_iso, label);
 
         rows.push(
           '<tr class="hs-event-row">' +
@@ -2507,7 +2517,9 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
       // NICHT enthalten (die Funktion wird in diesem Zweig gar nicht durchlaufen) --
       // wird hier separat ergaenzt, damit beide Datenformen konsistent sind.
       if (c.name) displayLabel += buildCompetitionSuffix(c);
-      var flagHtml = c.country_iso ? flagIconHtml(c.country_iso, displayLabel) : "";
+      // Ohne Bedingung, damit Zeilen ohne Land den Globus bekommen und die
+      // Namen aller Zeilen auf derselben Kante beginnen.
+      var flagHtml = flagIconHtml(c.country_iso, displayLabel);
       // v101.15: data-labels nur fuer das Mobile-Card-Layout der aufgeklappten
       // Wettbewerbszeilen. Desktop bleibt unveraendert, da diese Attribute erst
       // in der Mobile-Media-Query visuell genutzt werden.
