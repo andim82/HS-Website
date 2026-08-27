@@ -226,24 +226,80 @@ function hs_rest_queue_translations( WP_REST_Request $request ) {
 
 add_action( 'hs_translate_batch_cron', 'hs_translate_batch_cron_handler', 10, 3 );
 
+// Wie viele Strings gehen in EINEN OpenAI-Aufruf, und wie viele Aufrufe darf
+// ein einzelner Cron-Lauf machen? Beides wird notwendig, seit nicht mehr nur
+// vier Top-Wettbewerbe uebersetzt werden, sondern der gesamte Bestand
+// (Fussball allein: 743 eindeutige Namen, ueber alle Sportarten 1.071).
+//
+// CHUNK: gpt-4o-mini liefert maximal 16.384 Ausgabe-Tokens. Ein einziger
+// Aufruf ueber 1.071 Namen erzeugt rund 17.000 -- das JSON waere mitten drin
+// abgeschnitten, json_decode() liefert null, es wuerde NICHTS gespeichert, und
+// weil der Lock am Ende freigegeben wird, loeste der naechste Besucher denselben
+// kostenpflichtigen Aufruf erneut aus. Eine Endlosschleife ohne Ergebnis.
+//
+// CHUNKS_PER_RUN: begrenzt die Laufzeit eines Cron-Durchlaufs, damit PHPs
+// max_execution_time nicht zuschlaegt. Bleiben Strings uebrig, plant sich der
+// Job selbst erneut ein und behaelt dabei den Lock -- so stossen parallele
+// POSTs keine Doppelarbeit an.
+if ( ! defined( 'HS_TRANSLATE_CHUNK' ) ) {
+define( 'HS_TRANSLATE_CHUNK', 80 );
+}
+if ( ! defined( 'HS_TRANSLATE_CHUNKS_PER_RUN' ) ) {
+define( 'HS_TRANSLATE_CHUNKS_PER_RUN', 4 );
+}
+
 function hs_translate_batch_cron_handler( $lang, $cache_key, $strings ) {
-	$lock_key = hs_translations_lock_key( $lang, $cache_key );
+$lock_key   = hs_translations_lock_key( $lang, $cache_key );
+$option_key = hs_translations_option_key( $lang, $cache_key );
 
-	if ( empty( $strings ) || ! defined( 'HS_OPENAI_API_KEY' ) || ! HS_OPENAI_API_KEY ) {
-		delete_transient( $lock_key );
-		return;
-	}
+if ( empty( $strings ) || ! defined( 'HS_OPENAI_API_KEY' ) || ! HS_OPENAI_API_KEY ) {
+delete_transient( $lock_key );
+return;
+}
 
-	$translated = hs_openai_translate_batch( $strings, $lang );
+// Bereits Gespeichertes erneut abziehen: Zwischen Anmeldung und Ausfuehrung
+// kann ein anderer Lauf Teile schon uebersetzt haben.
+$stored  = get_option( $option_key, [] );
+$strings = array_values( array_diff( $strings, array_keys( $stored ) ) );
 
-	if ( ! empty( $translated ) ) {
-		$option_key = hs_translations_option_key( $lang, $cache_key );
-		$stored     = get_option( $option_key, [] );
-		$stored     = array_merge( $stored, $translated );
-		update_option( $option_key, $stored, false );
-	}
+if ( empty( $strings ) ) {
+delete_transient( $lock_key );
+return;
+}
 
-	delete_transient( $lock_key );
+$chunks    = array_chunk( $strings, HS_TRANSLATE_CHUNK );
+$processed = 0;
+
+foreach ( $chunks as $chunk ) {
+if ( $processed >= HS_TRANSLATE_CHUNKS_PER_RUN ) {
+break;
+}
+
+$translated = hs_openai_translate_batch( $chunk, $lang );
+$processed++;
+
+if ( empty( $translated ) ) {
+// Aufruf fehlgeschlagen -- Lauf beenden und Lock freigeben, damit ein
+// spaeterer Seitenaufruf es erneut versucht. Kein sofortiger Retry.
+delete_transient( $lock_key );
+return;
+}
+
+// Nach JEDEM Chunk speichern, damit ein Abbruch keinen Fortschritt kostet.
+$stored = get_option( $option_key, [] );
+$stored = array_merge( $stored, $translated );
+update_option( $option_key, $stored, false );
+}
+
+$remaining = array_slice( $strings, $processed * HS_TRANSLATE_CHUNK );
+
+if ( ! empty( $remaining ) ) {
+set_transient( $lock_key, 1, 10 * MINUTE_IN_SECONDS );
+wp_schedule_single_event( time() + 30, 'hs_translate_batch_cron', [ $lang, $cache_key, $remaining ] );
+return;
+}
+
+delete_transient( $lock_key );
 }
 
 // ── OpenAI-Call (serverseitig, Key nie im Frontend sichtbar) ─────────────
@@ -287,12 +343,32 @@ function hs_openai_translate_batch( $strings, $target_lang ) {
 			implode( '; ', $pairs ) . '.';
 	}
 
-	$prompt = "Translate the following sports terminology from German to " . $target_lang . ". " .
-		"Return ONLY a JSON object where each key is the original German text and the value is the translation. " .
-		"Keep proper nouns, country names and abbreviations as-is. " .
-		"Use official English names where they exist (e.g. 'FIFA WM' -> 'FIFA World Cup')." .
-		$glossary_hint . " " .
-		"Input: " . wp_json_encode( array_values( $to_translate ) );
+// Der Prompt ist bewusst restriktiv formuliert. Von 1.071 Wettbewerbsnamen
+// enthalten nur rund 330 einen generischen deutschen Begriff -- die uebrigen
+// sind Eigen- und Markennamen wie "Allsvenskan", "Coppa Italia" oder
+// "Primera Division", die unveraendert bleiben MUESSEN. Ein zu freier Prompt
+// erzeugt dort Schaden statt Nutzen.
+$prompt =
+"You normalise German sports competition names for a " . $target_lang . " audience.\n\n" .
+"RULES:\n" .
+"1. Translate ONLY generic sports terminology. Examples: Pokal -> Cup, " .
+"Freundschaft -> Friendlies, Frauen -> Women, Herren -> Men, Jugend -> Youth, " .
+"Aufstieg -> Promotion, Abstieg -> Relegation, Meisterschaft -> Championship, " .
+"Qualifikation -> Qualification, Olympische Spiele -> Olympic Games, " .
+"WM -> World Cup, EM -> European Championship, Testspiel -> Friendly.\n" .
+"2. NEVER translate proper nouns, brand names, club names, league brand names, " .
+"sponsor names, country names or abbreviations. These must be returned " .
+"COMPLETELY UNCHANGED, for example: Bundesliga, Allsvenskan, Superettan, " .
+"Serie A, Coppa Italia, Primera Division, Eredivisie, Ligue 1, MLS, NHL, DFB.\n" .
+"3. If a name mixes both, translate ONLY the generic part and keep the rest " .
+"byte-identical. Example: 'DFB-Pokal' -> 'DFB Cup', 'Bundesliga Frauen' -> " .
+"'Bundesliga Women'.\n" .
+"4. If a name needs no translation at all, return it EXACTLY as given.\n" .
+"5. Never invent, expand, abbreviate or reorder names. Never add explanations.\n" .
+$glossary_hint . "\n" .
+"Return ONLY a JSON object: each key is the original German string, each value " .
+"the result.\n" .
+"Input: " . wp_json_encode( array_values( $to_translate ) );
 
 	$args = [
 		'timeout' => 30,
