@@ -261,6 +261,16 @@
 .hs-coverage-more-item a:hover{border-color:#e75519;color:#e75519;}
 .hs-coverage-more-count{font-size:.72rem;font-weight:700;color:#6b7280;}
 .hs-flag-round{display:inline-block;width:32px;height:32px;border-radius:50%;background-size:cover;background-position:center;flex-shrink:0;box-shadow:0 0 0 1px rgba(255,255,255,.2);}
+/* Globus fuer Wettbewerbe ohne Landzugehoerigkeit (FIFA WM, UEFA-Bewerbe).
+   Die Quelldatei ist schwarz gefuellt und laesst sich als background-image
+   nicht umfaerben -- deshalb als Maske: die Form kommt aus der SVG, die Farbe
+   aus background-color. */
+.hs-flag-globe{display:inline-block;width:32px;height:32px;flex-shrink:0;background-color:transparent;}
+@supports ((mask-image:none) or (-webkit-mask-image:none)){
+.hs-flag-globe{background-color:#fff;-webkit-mask:url("https://heimspiel.de/wp-content/uploads/2026/08/world-wide-global-sign-svgrepo-com.svg") center/contain no-repeat;mask:url("https://heimspiel.de/wp-content/uploads/2026/08/world-wide-global-sign-svgrepo-com.svg") center/contain no-repeat;}
+/* Panel-Zeilen haben weissen Hintergrund -- dort waere weiss auf weiss unsichtbar. */
+.hs-tc-panel .hs-flag-globe{background-color:#061d3e;}
+}
 .hs-card-compact .hs-card-head{display:flex;align-items:center;gap:.5rem;width:100%;box-sizing:border-box;justify-content:flex-start;}
 .hs-coverage-group-heading{font-size:.78rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;margin:1.25rem 0 .6rem;}
 .hs-coverage-more-list .hs-coverage-group-heading:first-of-type{margin-top:0;}
