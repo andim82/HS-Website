@@ -217,7 +217,7 @@ class HS_Seo_Meta {
 			// Wichtig: KEIN JSON_UNESCAPED_SLASHES. Escapte Slashes verhindern,
 			// dass ein "</script>" in einem Textfeld den Script-Block vorzeitig
 			// beendet -- das ist der Standard-XSS-Vektor bei JSON-LD.
-			$json = wp_json_encode( $jsonld, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT );
+			$json = wp_json_encode( $jsonld, JSON_UNESCAPED_UNICODE );
 			if ( $json ) {
 				echo '<script type="application/ld+json" id="hs-seo-jsonld-server">' . "\n";
 				echo $json . "\n";
