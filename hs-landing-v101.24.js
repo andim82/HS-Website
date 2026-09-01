@@ -2078,7 +2078,8 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
   // Manuelle Uebersetzungen fuer Regionen, die Intl.DisplayNames nicht kennt
   // (z.B. Sub-Region-Codes wie GB-NIR fuer Nordirland).
   const NAME_TRANSLATIONS_OVERRIDE = {
-    "gb-nir": { de: "Nordirland", en: "Northern Ireland" }
+    "gb-nir": { de: "Nordirland", en: "Northern Ireland" },
+    "gb-sct": { de: "Schottland", en: "Scotland" }
   };
 
   function flagIconHtml(iso, name) {
