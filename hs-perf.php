@@ -22,11 +22,18 @@
  *                                Nur fuer jQuery-Code vor Version 3 noetig.
  *   2. tf-footer-style.css       liefert HTTP 200 mit 0 Byte -- ein Roundtrip
  *                                im <head> ohne jeden Inhalt.
- *   3. OMGF-Stylesheet           liefert HTTP 404. Die URL ist fehlerhaft
- *                                zusammengesetzt (Host steht doppelt darin).
- *                                Renderblockierender 404.
- *   4. wp-statistics tracker.js  8,7 KB, blockierend im Body, fuer die
+ *   3. wp-statistics tracker.js  8,7 KB, blockierend im Body, fuer die
  *                                Darstellung ohne Bedeutung -> defer.
+ *
+ * NICHT anfassen: das OMGF-Stylesheet
+ *   //heimspiel.de/wp-content/uploads/omgf/flatsome-googlefonts/...
+ * In einer fruehen Fassung dieser Datei stand es als "HTTP 404" auf der
+ * Streichliste. Das war ein Messfehler: Der Verweis ist protokoll-relativ und
+ * beginnt mit "//", das Pruefskript hatte "https://heimspiel.de" davorgesetzt
+ * und damit den Host verdoppelt. Nachgeprueft liefert die Datei HTTP 200 mit
+ * 377 Byte, die zugehoerige Lato-Schrift 23.580 Byte. OMGF ersetzt damit den
+ * externen Google-Fonts-Aufruf durch eine lokale Kopie -- das ist ein Vorteil
+ * fuer die Ladezeit und darf keinesfalls entfernt werden.
  *
  * Was diese Datei NICHT erledigt, obwohl es messbar teuer ist:
  *   - Das doppelte Google-Tag. Es steht als fest eingetragenes Markup in der
@@ -50,8 +57,7 @@ if ( ! class_exists( 'HS_Perf' ) ) {
 		 * bekannt sein muessen.
 		 */
 		const STYLE_DROP = array(
-			'tf-footer-style',                 // 0 Byte
-			'omgf/flatsome-googlefonts',       // HTTP 404, fehlerhafte URL
+			'tf-footer-style',   // HTTP 200 mit 0 Byte, nachgeprueft
 		);
 
 		/**
