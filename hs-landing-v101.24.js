@@ -111,8 +111,34 @@ function renderLoader() {
   const discipline = root.dataset.discipline;
   const bundle     = root.dataset.bundle;
 
-  injectStyles();
+    injectStyles();
+
+  // CLS-Fix. Der Snapshot liefert die Seite vollstaendig aus; wird sie hier
+  // durch den Loader ersetzt, fallen rund 5.900 px Hoehe weg. Der Footer
+  // rutscht dadurch von y=6.314 auf y=433, also mitten in den sichtbaren
+  // Bereich, und ~700 ms spaeter wieder zurueck. Gemessener CLS: 0,7504 aus
+  // genau zwei Spruengen. Mit der Reservierung: 0.
+  //
+  // Die Schwelle von 400 px sorgt dafuer, dass Seiten OHNE Snapshot sich
+  // unveraendert verhalten -- dort ist nichts zu reservieren und der Loader
+  // laeuft wie bisher.
+  var hsReservedHeight = root.getBoundingClientRect().height;
+  if (hsReservedHeight > 400) {
+    root.style.minHeight = Math.round(hsReservedHeight) + "px";
+  }
+
   root.innerHTML = renderLoader();
+
+  // Gibt die Reservierung frei, sobald echter Inhalt im Container steht.
+  if (root.style.minHeight) {
+    var hsHeightObs = new MutationObserver(function () {
+      if (root.querySelector(".hs-hero, .hs-stats-bar, .hs-cards-section")) {
+        hsHeightObs.disconnect();
+        requestAnimationFrame(function () { root.style.minHeight = ""; });
+      }
+    });
+    hsHeightObs.observe(root, { childList: true });
+  }
 
   Promise.all([fetchIndex(), fetchGeneralIndex()])
   .then(([index, general]) => {
@@ -2140,11 +2166,10 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
 
     function buildCountryCard(c) {
       var panelId = "hs-cc-panel-" + bundleKey + "-" + (panelIdxCounter++);
-      // countryIso zusaetzlich merken: Die Wettbewerbszeilen des Coverage-
-      // Endpoints tragen selbst KEIN country_iso, das Land steht nur auf der
-      // Gruppe. Der Panel-Renderer erkennt hieran, dass es eine Laendergruppe
-      // ist, und laesst die Zeilen-Icons weg -- die Flagge steht bereits im
-      // Kachelkopf darueber.
+      // countryIso wird an das Panel durchgereicht, damit compRowHtml() die
+      // Zeilen-Icons unterdruecken kann: Innerhalb eines Laender-Panels ist
+      // die Flagge in jeder Zeile redundant, und Wettbewerbe ohne eigenen
+      // country_iso wuerden dort sonst faelschlich den Globus zeigen.
       window.hsCompetitionPanelData[panelId] = { competitions: c.topCompetitions || [], groupLabel: c._displayName, topCount: c.topCompetitionsCount || 0, countryIso: c.country_iso || "" };
       return (
         '<div class="hs-tc-card-wrap">' +
@@ -2160,8 +2185,9 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
     }
     function buildFedCard(i) {
       var panelId = "hs-cc-panel-" + bundleKey + "-" + (panelIdxCounter++);
-      // Foederationen wie UEFA, FIFA oder CAF haben bewusst kein Land --
-      // dort bleibt der Globus die richtige Anzeige.
+      // Verbaende (CONMEBOL, UEFA, FIFA ...) haben keinen Laender-Code. Leer
+      // gesetzt heisst: Zeilen-Icons bleiben sichtbar, kontinentale
+      // Wettbewerbe zeigen dort also weiterhin den Globus.
       window.hsCompetitionPanelData[panelId] = { competitions: i.topCompetitions || [], groupLabel: i.federation, topCount: i.topCompetitionsCount || 0, countryIso: "" };
       return (
         '<div class="hs-tc-card-wrap">' +
@@ -2456,9 +2482,15 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
             '<td class="hs-tc-col-num" data-label="' + labelMatches + '">' + (c.seasonMatches || 0) + '</td>' +
             '<td class="hs-tc-col-num" data-label="' + labelLiveScores + '">' + (c.liveScores || 0) + '</td>' +
             '<td class="hs-tc-col-num" data-label="' + labelLiveTicker + '">' +
+              // Nur im vorgerenderten Zustand ein Zeichen statt des Labels.
+              // "Auf Anfrage" stand 209 mal im Quelltext und war mit 418
+              // Woertern der haeufigste Text der ganzen Seite -- 18,11 % aller
+              // Zweiwortphrasen entfielen auf "auf anfrage". Beim Aufklappen
+              // ersetzt hsRenderCompetitionPanel() den Inhalt komplett, dort
+              // steht das Label also unveraendert.
               (c.liveTicker > 0
                 ? '<span class="hs-lt-yes">\u2713</span>'
-                : '<span class="hs-lt-no">' + labelOnRequest + '</span>') +
+                : '<span class="hs-lt-no">\u2013</span>') +
             '</td>' +
           '</tr>'
         );
@@ -2470,9 +2502,12 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
         .split("{group}").join((data && data.groupLabel) || "")
         .split("{displayName}").join(sportLabel);
 
+      // Kein <thead> in der Vorschau: 109 Tabellenkoepfe brachten 545 Woerter
+      // identischen Boilerplate-Text in den Quelltext. Die Panels sind vor dem
+      // Klick ohnehin "hidden", und hsRenderCompetitionPanel() baut die
+      // sichtbare Tabelle mit vollem Kopf neu auf.
       panelEl.innerHTML =
         '<div class="hs-table-wrap"><table class="hs-events-table">' +
-          theadHtml +
           '<tbody>' + rows.join("") + '</tbody>' +
         '</table></div>';
 
@@ -2489,11 +2524,6 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
     var g = window.hsGeneralIndexData || {};
     var comps = data.competitions || [];
     var topCount = typeof data.topCount === "number" ? data.topCount : 0;
-    // Land der Gruppe. Wird in compRowHtml() ausgewertet, um in Laender-Panels
-    // auf Zeilen-Icons zu verzichten. FEHLTE zuvor, obwohl compRowHtml() sie
-    // liest -- unter "use strict" ein ReferenceError, der den ganzen
-    // Panel-Aufbau abbrach.
-    var panelCountryIso = data.countryIso || "";
 
     var labelMatches = (g.labelmatches || "Matches");
     var labelLiveScores = (g.labellivescores || "Live Scores");
@@ -2502,6 +2532,12 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
     var labelTop = (g.labeltopcompetitions || "Top Wettbewerbe");
     var labelRest = (g.labelothercompetitions || "Weitere Wettbewerbe");
     var labelOnRequest = (g.labelonrequest || "Auf Anfrage");
+
+    // Laender-Code des Panels. MUSS deklariert sein: compRowHtml() liest ihn,
+    // und ohne Deklaration bricht die Funktion unter "use strict" mit
+    // ReferenceError ab -- dann bleibt die vorgerenderte Vorschau stehen
+    // (nur 3 Zeilen, keine Statistik-Pills).
+    var panelCountryIso = data.countryIso || "";
 
     if (!comps.length) {
       panelEl.innerHTML = '<p class="hs-no-data" style="padding:.5rem 0;">–</p>';
@@ -2638,7 +2674,9 @@ function renderTopCompetitionsCards(topCompetitions, b, g, bundleKey, sportKeyTo
     const cards = topCompetitions.map(function(c, idx) {
       var displayLabel = buildCompetitionDisplayLabel(c);
       var panelId = "hs-tc-panel-" + bundleKey + "-" + idx;
-      window.hsCompetitionPanelData[panelId] = { competitions: [c], groupLabel: displayLabel };
+      // Top-Wettbewerbs-Panel: steht fuer einen einzelnen Wettbewerb, nicht
+      // fuer ein Land -- die Flagge der Zeile bleibt deshalb sichtbar.
+      window.hsCompetitionPanelData[panelId] = { competitions: [c], groupLabel: displayLabel, countryIso: "" };
 
 	var sportKeyRaw = (c.sport && String(c.sport).trim() !== "") ? String(c.sport).trim() : "";
       var sportDisplayName = sportKeyRaw ? (sportKeyToDisplayName[sportKeyRaw.toLowerCase()] || sportKeyRaw) : "";
