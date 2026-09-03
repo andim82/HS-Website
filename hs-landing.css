@@ -306,3 +306,15 @@
       stehen deshalb nur einmal hier.
    ========================================================================== */
 .wp-block-html,.wp-block-html>div,.entry-content>.wp-block-html{margin-top:0!important;padding-top:0!important;}#hs-lp-root,#hs-root{margin-top:0!important;padding-top:0!important;}@media(max-width:768px){body>*:not(script):not(style),.site-main,.main-content,#main,#content,.wp-site-blocks,.is-layout-flow,[class*="wp-container"]{padding-top:0!important;}}
+
+/* ====================================
+ * Event-Template (clusterTemplate="event")
+ * ==================================== */
+/* Der blaue Kachelkopf soll bei ein- und zweizeiligen Sportart-Namen gleich
+ * hoch sein. Ohne Mindesthoehe wird die Kachel mit "Nordische Kombination"
+ * hoeher als ihre Nachbarn und die Reihe wirkt unruhig. Rechnung:
+ * 2 Zeilen x 1.3 line-height x .9rem = 2.34rem + 2 x .9rem Padding = 4.14rem.
+ * Bewusst min-height statt height: laengere Namen duerfen weiter wachsen,
+ * statt den Text abzuschneiden. Nur auf Event-Kacheln (.hs-event-card),
+ * damit Wintersport- und Coverage-Kacheln unveraendert bleiben. */
+.hs-event-card .hs-card-head{min-height:4.15rem;}

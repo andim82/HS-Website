@@ -880,7 +880,10 @@ renderCoverageSection(b, g) +
 
     // Auto-Übersetzung der Competition-Namen (fire-and-forget, nur wenn pageLang != "de")
 var hsTranslationPromise = Promise.resolve(null);
-if (useCoverageMode) {
+// Event-Seiten muessen hier mit hinein: useCoverageMode ist dort bewusst
+// false (kein /coverage-Abruf), die Sportart- und Event-Namen brauchen aber
+// dieselbe Uebersetzungs-Anmeldung wie bei den anderen Templates.
+if (useCoverageMode || isEventTemplate) {
   // Wird von hsPrerenderPanels() und hsRenderCompetitionPanel() fuer die
   // Tabellen-Caption gebraucht, in beiden Faellen ausserhalb dieses Scopes.
   window.hsSportDisplayName = f(b, "displayName", bundleName);
@@ -911,6 +914,19 @@ if (useCoverageMode) {
       .forEach(function(grp) {
         (grp.topCompetitions || []).forEach(function(c) { if (c) addCompName(c.name); });
       });
+  }
+
+  // NEU (Event-Template): Sportart-Namen der Kacheln UND die gekuerzten
+  // Event-Namen der aufklappbaren Listen anmelden. Beides laeuft ueber
+  // dieselbe Mechanik wie bei den anderen Templates:
+  //   - Kachel-Namen patcht applyCompetitionTranslations() ueber .hs-card-sport
+  //   - Zeilennamen loest compRowHtml() ueber hsTranslateCompName() auf
+  // Angemeldet wird der SHORT name, weil genau der als c.name im Panel steht.
+  if (eventData && eventData.sports) {
+    eventData.sports.forEach(function(sp) {
+      addCompName(sp.name);
+      (sp.events || []).forEach(function(ev) { addCompName(ev.shortName || ev.name); });
+    });
   }
 
   if (compNames.length) {
@@ -2845,7 +2861,7 @@ function renderTopCompetitionsCards(topCompetitions, b, g, bundleKey, sportKeyTo
 
       return (
         '<div class="hs-tc-card-wrap" style="display:block !important;position:relative !important;">' +
-          '<button type="button" class="hs-card hs-tc-card fade-in" ' +
+          '<button type="button" class="hs-card hs-tc-card hs-event-card fade-in" ' +
             'aria-expanded="false" aria-controls="' + panelId + '" ' +
             'onclick="window.hsToggleCompetitionPanel(this, \'' + panelId + '\')">' +
             '<div class="hs-card-head"><span class="hs-card-sport">' + sportName + '</span>' + liveTag + '</div>' +

@@ -38,8 +38,8 @@ function hs_fetch_csv( $gid ) {
 	if ( $gid === '1008552869' ) {
 		return [
 			// Ski Alpin: drei Saisons desselben Wettbewerbs -> EIN Event
-			[ 'country'=>'', 'sport'=>'Ski Alpin', 'season_end'=>$future, 'competition_id'=>'1303', 'name'=>'Olympische Winterspiele - Slalom', 'number_matches'=>'3', 'gender'=>'male' ],
-			[ 'country'=>'', 'sport'=>'Ski Alpin', 'season_end'=>$recent, 'competition_id'=>'1303', 'name'=>'Olympische Winterspiele - Slalom', 'number_matches'=>'3', 'gender'=>'male' ],
+			[ 'country'=>'', 'sport'=>'Ski Alpin', 'season_end'=>$future, 'competition_id'=>'1303', 'name'=>'Olympische Winterspiele - Slalom', 'number_matches'=>'3', 'gender'=>'male', 'result_list'=>'1. Durchgang,Gesamt,Startliste' ],
+			[ 'country'=>'', 'sport'=>'Ski Alpin', 'season_end'=>$recent, 'competition_id'=>'1303', 'name'=>'Olympische Winterspiele - Slalom', 'number_matches'=>'3', 'gender'=>'male', 'result_list'=>'Gesamt,Startliste' ],
 			[ 'country'=>'', 'sport'=>'Ski Alpin', 'season_end'=>$future, 'competition_id'=>'1301', 'name'=>'Olympische Winterspiele - Super-G', 'number_matches'=>'2', 'gender'=>'male' ],
 			[ 'country'=>'', 'sport'=>'Ski Alpin', 'season_end'=>$future, 'competition_id'=>'1302', 'name'=>'Olympische Winterspiele - Riesenslalom', 'number_matches'=>'2', 'gender'=>'male' ],
 			// Biathlon
@@ -121,6 +121,10 @@ else {
 	check( 'Events alphabet.',  implode( '|', array_column( $alpin, 'shortName' ) ), 'Riesenslalom|Slalom|Super-G' );
 	check( 'Vollname erhalten', $alpin[1]['name'], 'Olympische Winterspiele - Slalom' );
 	check( 'Saisons dedupliziert', count( $alpin ), 3 );
+	// result_list muss wie stats_list behandelt werden (Wintersport-Tab).
+	$slalom = null;
+	foreach ( $alpin as $ev ) { if ( $ev['shortName'] === 'Slalom' ) $slalom = $ev; }
+	check( 'result_list als statsList', $slalom ? $slalom['statsList'] : '(kein Slalom)', '1. Durchgang,Gesamt,Startliste' );
 }
 
 echo "\n--- Sommerspiele (ohne sport-Spalte, tab-uebergreifend) ---\n";

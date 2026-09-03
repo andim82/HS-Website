@@ -771,7 +771,14 @@ function hs_build_last_season_stats( array $rows ) {
 		$stats[ $compId ]['liveTicker'] += $lsFull;
 
 		if ( $stats[ $compId ]['statsList'] === '' ) {
+			// Der Wintersport-Tab fuehrt die Datenpunkte in der Spalte
+			// "result_list" statt "stats_list" (alle anderen Sport-Tabs).
+			// Beide werden gleichwertig behandelt, sonst bleiben die
+			// Statistik-Pills dort leer und zeigen nur einen Strich.
 			$sl = trim( (string) ( $row['stats_list'] ?? '' ) );
+			if ( $sl === '' ) {
+				$sl = trim( (string) ( $row['result_list'] ?? '' ) );
+			}
 			if ( $sl !== '' ) {
 				$stats[ $compId ]['statsList'] = $sl;
 			}
@@ -880,7 +887,9 @@ $liveTicker += $lsFull;
 $liveScores += ( $lsFull + $lsData + $lsGoals + $lsResult );
 
 if ( $statsList === '' ) {
+// Wintersport-Tab nutzt "result_list" statt "stats_list" -- beide gelten.
 $sl = trim( (string) ( $row['stats_list'] ?? '' ) );
+if ( $sl === '' ) $sl = trim( (string) ( $row['result_list'] ?? '' ) );
 if ( $sl !== '' ) $statsList = $sl;
 }
 }
