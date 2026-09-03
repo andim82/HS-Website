@@ -172,6 +172,15 @@ function hs_refresh_all_cache_v2() {
 	foreach ( $index as $row ) {
 		$row_lc = array_change_key_case( $row, CASE_LOWER );
 		$type   = isset( $row_lc['type'] ) ? strtolower( trim( $row_lc['type'] ) ) : '';
+		$tpl    = isset( $row_lc['clustertemplate'] ) ? strtolower( trim( $row_lc['clustertemplate'] ) ) : '';
+
+		// Event-Cluster (clusterTemplate="event") haben bewusst weder eigene
+		// gid noch Mitglieds-Tabs in der Spalte "bundle" -- ihre Wettbewerbe
+		// werden ueber den Namensfilter aus den bestehenden Sport-Tabs
+		// zusammengesucht (Schritt 6b). Ohne diese Ausnahme versucht
+		// hs_build_coverage_for_sport() den Bundle-Namen als Sport-Tab
+		// aufzuloesen und meldet "keine gid gefunden".
+		if ( $tpl === 'event' ) continue;
 
 		$dk     = isset( $row_lc['discipline_key'] ) ? trim( $row_lc['discipline_key'] ) : '';
 		$bn     = isset( $row_lc['bundlename'] ) ? trim( $row_lc['bundlename'] ) : '';
@@ -235,6 +244,12 @@ function hs_refresh_all_cache_v2() {
 	foreach ( $index as $row ) {
 		$row_lc = array_change_key_case( $row, CASE_LOWER );
 		$type   = isset( $row_lc['type'] ) ? strtolower( trim( $row_lc['type'] ) ) : '';
+		$tpl    = isset( $row_lc['clustertemplate'] ) ? strtolower( trim( $row_lc['clustertemplate'] ) ) : '';
+
+		// Auch hier Event-Cluster ueberspringen: ihre Summen liefert der
+		// Event-Endpoint (totalSports/totalEvents/totalLive), ein leerer
+		// Bundle-Totals-Transient waere nur Ballast.
+		if ( $tpl === 'event' ) continue;
 
 		$dk = isset( $row_lc['discipline_key'] ) ? trim( $row_lc['discipline_key'] ) : '';
 		$bn = isset( $row_lc['bundlename'] ) ? trim( $row_lc['bundlename'] ) : '';
