@@ -194,6 +194,41 @@ function hs_refresh_all_cache_v2() {
 	];
 	if ( ! empty( $coverage_errors ) ) $report['overall_success'] = false;
 
+	// ── 6b. Event-Coverage fuer Cluster mit clusterTemplate="event". ──────
+	// Nur diese Zeilen nutzen den Namensfilter; alle anderen wuerden hier
+	// zwangslaeufig mit "missing_name_filter" scheitern und den Report
+	// unnoetig rot faerben.
+	$event_errors  = [];
+	$event_success = 0;
+	foreach ( $index as $row ) {
+		$row_lc = array_change_key_case( $row, CASE_LOWER );
+		$type   = isset( $row_lc['type'] ) ? strtolower( trim( $row_lc['type'] ) ) : '';
+		$tpl    = isset( $row_lc['clustertemplate'] ) ? strtolower( trim( $row_lc['clustertemplate'] ) ) : '';
+
+		if ( $type !== 'cluster' || $tpl !== 'event' ) continue;
+
+		$dk = isset( $row_lc['discipline_key'] ) ? trim( $row_lc['discipline_key'] ) : '';
+		$bn = isset( $row_lc['bundlename'] ) ? trim( $row_lc['bundlename'] ) : '';
+		$eventSlug = hs_slugify( $dk !== '' ? $dk : $bn );
+		if ( $eventSlug === '' ) continue;
+
+		$eventData = hs_build_event_coverage( $eventSlug );
+		if ( is_wp_error( $eventData ) ) {
+			$event_errors[] = $eventSlug . ': ' . $eventData->get_error_message();
+			continue;
+		}
+		set_transient( 'hs_event_coverage_' . $eventSlug, $eventData, HS_CACHE_TTL );
+		$event_success++;
+	}
+	if ( $event_success > 0 || ! empty( $event_errors ) ) {
+		$report['sources']['event_coverage'] = [
+			'success' => empty( $event_errors ),
+			'count'   => $event_success,
+			'error'   => empty( $event_errors ) ? null : implode( ' | ', $event_errors ),
+		];
+		if ( ! empty( $event_errors ) ) $report['overall_success'] = false;
+	}
+
 	// ── 7. Bundle-Totals fuer alle Cluster-Bundles neu berechnen. ─────────
 	$totals_errors  = [];
 	$totals_success = 0;
@@ -1260,4 +1295,275 @@ $totalMatches += $lsStatsRow['matches'];
 		'international' => $intlList,
 		'topCompetitions' => $globalTop,
 	];
+}
+
+/**
+ * NEU (Event-Template): Baut die Sportarten-Gruppierung fuer ein Multi-Sport-
+ * EVENT (z.B. Olympische Winterspiele / Olympische Spiele).
+ *
+ * Unterschied zu hs_build_coverage_for_sport():
+ *   - Die Auswahl der Wettbewerbe erfolgt NICHT ueber kuratierte competition_ids
+ *     (Spalte "topCompetitions"), sondern ueber einen Namensfilter (neue
+ *     Index-Spalte "nameFilter", z.B. "Olympische Winterspiele"). Damit muss
+ *     nicht jede einzelne Competition-ID von Hand gepflegt werden.
+ *   - Gruppiert wird nach SPORTART statt nach Land/Foederation:
+ *       * Hat der Sport-Tab eine eigene "sport"-Spalte (z.B. Wintersport mit
+ *         "Ski Alpin", "Biathlon", ...), wird diese als Gruppe genutzt.
+ *       * Fehlt sie (z.B. Basketball-Tab), dient der Tab selbst als Gruppe --
+ *         so entstehen bei Sommerspielen Kacheln pro Sportart-Tab.
+ *   - Es werden ALLE Sport-Tabs durchsucht (jede Cluster-Zeile mit gid), damit
+ *     ein Event ueber beliebig viele Sportarten hinweg greift, ohne dass die
+ *     Mitglieder in der Spalte "bundle" gepflegt werden muessen.
+ *
+ * @param  string $slug bundleName/discipline_key der Cluster-Zeile.
+ * @return array|WP_Error
+ */
+function hs_build_event_coverage( $slug ) {
+	$slug = hs_slugify( $slug );
+
+	$index = get_transient( 'hs_index_data' );
+	if ( $index === false ) {
+		$index = hs_fetch_index();
+		if ( is_wp_error( $index ) ) {
+			return $index;
+		}
+	}
+
+	// ── 1. Cluster-Zeile + nameFilter ermitteln ─────────────────────────────
+	$nameFilter = '';
+	$found      = false;
+
+	foreach ( $index as $row ) {
+		$row_lc = array_change_key_case( $row, CASE_LOWER );
+		$type   = isset( $row_lc['type'] ) ? strtolower( trim( $row_lc['type'] ) ) : '';
+		if ( $type !== 'cluster' ) continue;
+
+		$bn = isset( $row_lc['bundlename'] ) ? hs_slugify( $row_lc['bundlename'] ) : '';
+		$dk = isset( $row_lc['discipline_key'] ) ? hs_slugify( $row_lc['discipline_key'] ) : '';
+
+		if ( $bn === $slug || $dk === $slug ) {
+			$nameFilter = trim( (string) ( $row_lc['namefilter'] ?? '' ) );
+			$found      = true;
+			break;
+		}
+	}
+
+	if ( ! $found ) {
+		return new WP_Error( 'not_found', 'Keine Cluster-Zeile fuer "' . $slug . '" im Index-Sheet gefunden.' );
+	}
+	if ( $nameFilter === '' ) {
+		return new WP_Error(
+			'missing_name_filter',
+			'Cluster "' . $slug . '" nutzt clusterTemplate="event", aber die Spalte "nameFilter" ist leer.'
+		);
+	}
+
+	// ── 2. Alle Sport-Tabs sammeln (Cluster-Zeilen mit gid, dedupliziert) ───
+	$tabs = [];
+	foreach ( $index as $row ) {
+		$row_lc = array_change_key_case( $row, CASE_LOWER );
+		$type   = isset( $row_lc['type'] ) ? strtolower( trim( $row_lc['type'] ) ) : '';
+		if ( $type !== 'cluster' ) continue;
+
+		$gid = isset( $row_lc['gid'] ) ? trim( (string) $row_lc['gid'] ) : '';
+		if ( $gid === '' || isset( $tabs[ $gid ] ) ) continue;
+
+		$dk = isset( $row_lc['discipline_key'] ) ? hs_slugify( $row_lc['discipline_key'] ) : '';
+		$bn = isset( $row_lc['bundlename'] ) ? hs_slugify( $row_lc['bundlename'] ) : '';
+
+		$tabs[ $gid ] = [
+			'key'   => $dk !== '' ? $dk : $bn,
+			'label' => trim( (string) (
+				$row_lc['displayname'] ?? $row_lc['name'] ?? $row_lc['bundlename'] ?? ''
+			) ),
+		];
+	}
+
+	if ( empty( $tabs ) ) {
+		return new WP_Error( 'no_tabs', 'Keine Sport-Tabs (Cluster-Zeilen mit gid) im Index-Sheet gefunden.' );
+	}
+
+	// ── 3. Zeilen laden und per Namensfilter einsammeln ─────────────────────
+	$needle  = function_exists( 'mb_strtolower' ) ? mb_strtolower( $nameFilter ) : strtolower( $nameFilter );
+	$matched = [];
+	$errors  = [];
+
+	foreach ( $tabs as $gid => $tab ) {
+		$rows = hs_fetch_csv( $gid );
+		if ( is_wp_error( $rows ) ) {
+			$errors[] = ( $tab['label'] !== '' ? $tab['label'] : $gid ) . ': ' . $rows->get_error_message();
+			continue;
+		}
+
+		foreach ( $rows as $r ) {
+			$r_lc = array_change_key_case( $r, CASE_LOWER );
+
+			$name = trim( (string) ( $r_lc['name'] ?? $r_lc['competition_name'] ?? '' ) );
+			if ( $name === '' ) continue;
+
+			$hay = function_exists( 'mb_strtolower' ) ? mb_strtolower( $name ) : strtolower( $name );
+			if ( strpos( $hay, $needle ) === false ) continue;
+
+			// Gruppe: eigene sport-Spalte des Tabs, sonst der Tab selbst.
+			$group = trim( (string) ( $r_lc['sport'] ?? '' ) );
+			if ( $group === '' ) {
+				$group = $tab['label'] !== '' ? $tab['label'] : $tab['key'];
+			}
+
+			$r_lc['_hs_event_group'] = $group;
+			$r_lc['_hs_sport_key']   = $tab['key'];
+			$matched[]               = $r_lc;
+		}
+	}
+
+	if ( empty( $matched ) ) {
+		return new WP_Error(
+			'no_matches',
+			'Kein Wettbewerb enthaelt "' . $nameFilter . '" in der Spalte "name" (' . count( $tabs ) . ' Tabs durchsucht).'
+		);
+	}
+
+	// ── 4. Saison-Statistiken (letzte abgeschlossene Saison je Wettbewerb) ──
+	// Der Namensfilter laesst alle Saisons eines Wettbewerbs passieren, daher
+	// bleibt die Saison-Clusterung in hs_build_last_season_family_stats() intakt.
+	$lastSeasonStats = hs_build_last_season_family_stats( $matched );
+
+	// Veraltete Wettbewerbe aussortieren -- gleiche Regel wie in
+	// hs_aggregate_coverage(), damit eingestellte Disziplinen verschwinden,
+	// zyklische Events (alle 4 Jahre) mit angekuendigter Saison aber bleiben.
+	$STALE_YEARS_THRESHOLD = 4;
+	$staleCutoffTs = strtotime( '-' . $STALE_YEARS_THRESHOLD . ' years' );
+	$staleCompIds  = [];
+	foreach ( $lastSeasonStats as $lsCompId => $lsStats ) {
+		if ( empty( $lsStats['hasCurrentSeason'] )
+			&& ! empty( $lsStats['lastCompletedEnd'] )
+			&& $lsStats['lastCompletedEnd'] < $staleCutoffTs ) {
+			$staleCompIds[ $lsCompId ] = true;
+		}
+	}
+
+	// ── 5. Nach Sportart gruppieren, je Wettbewerb einmal ───────────────────
+	$groups = [];
+	$seen   = [];
+
+	foreach ( $matched as $row ) {
+		$compId = trim( (string) ( $row['competition_id'] ?? '' ) );
+		if ( $compId === '' ) continue;
+		if ( isset( $staleCompIds[ $compId ] ) ) continue;
+
+		$group     = $row['_hs_event_group'];
+		$dedupeKey = $group . '|' . $compId;
+		if ( isset( $seen[ $dedupeKey ] ) ) continue;
+		$seen[ $dedupeKey ] = true;
+
+		$stats = $lastSeasonStats[ $compId ] ?? [
+			'matches'    => 0,
+			'liveScores' => 0,
+			'liveTicker' => 0,
+			'statsList'  => '',
+		];
+
+		$fullName = trim( (string) ( $row['name'] ?? $row['competition_name'] ?? '' ) );
+
+		if ( ! isset( $groups[ $group ] ) ) {
+			$groups[ $group ] = [
+				'name'       => $group,
+				'key'        => hs_slugify( $group ),
+				'sportKey'   => $row['_hs_sport_key'],
+				'events'     => [],
+				'eventCount' => 0,
+				'liveCount'  => 0,
+				'matches'    => 0,
+			];
+		}
+
+		$liveScores = (int) $stats['liveScores'];
+
+		$groups[ $group ]['events'][] = [
+			'name'          => $fullName,
+			'shortName'     => hs_event_short_name( $fullName, $nameFilter ),
+			'compId'        => $compId,
+			'sport'         => $group,
+			'matches'       => (int) $stats['matches'],
+			'seasonMatches' => (int) $stats['matches'],
+			'liveScores'    => $liveScores,
+			'liveTicker'    => (int) $stats['liveTicker'],
+			'statsList'     => (string) $stats['statsList'],
+			'gender'        => trim( (string) ( $row['gender'] ?? '' ) ),
+			'age'           => trim( (string) ( $row['age'] ?? '' ) ),
+			'federation'    => trim( (string) ( $row['federation'] ?? '' ) ),
+			'country'       => trim( (string) ( $row['country'] ?? '' ) ),
+		];
+
+		$groups[ $group ]['eventCount']++;
+		$groups[ $group ]['matches'] += (int) $stats['matches'];
+		if ( $liveScores > 0 ) {
+			$groups[ $group ]['liveCount']++;
+		}
+	}
+
+	if ( empty( $groups ) ) {
+		return new WP_Error(
+			'no_current_events',
+			'Alle Treffer fuer "' . $nameFilter . '" liegen mehr als ' . $STALE_YEARS_THRESHOLD . ' Jahre zurueck.'
+		);
+	}
+
+	// Events innerhalb einer Sportart alphabetisch, Sportarten nach Event-Zahl.
+	foreach ( $groups as &$grp ) {
+		usort( $grp['events'], function( $a, $b ) {
+			return strcasecmp( $a['shortName'], $b['shortName'] );
+		} );
+	}
+	unset( $grp );
+
+	$sports = array_values( $groups );
+	usort( $sports, function( $a, $b ) {
+		if ( $a['eventCount'] === $b['eventCount'] ) {
+			return strcasecmp( $a['name'], $b['name'] );
+		}
+		return $b['eventCount'] <=> $a['eventCount'];
+	} );
+
+	$totalEvents = 0;
+	$totalLive   = 0;
+	foreach ( $sports as $s ) {
+		$totalEvents += $s['eventCount'];
+		$totalLive   += $s['liveCount'];
+	}
+
+	return [
+		'nameFilter'  => $nameFilter,
+		'totalSports' => count( $sports ),
+		'totalEvents' => $totalEvents,
+		'totalLive'   => $totalLive,
+		'sports'      => $sports,
+		'errors'      => $errors,
+	];
+}
+
+/**
+ * Kuerzt einen Wettbewerbsnamen um den Filter-Praefix.
+ * "Olympische Winterspiele - Slalom" + Filter "Olympische Winterspiele" -> "Slalom"
+ *
+ * Bleibt nach dem Kuerzen nichts uebrig (z.B. Basketball, wo der Wettbewerb
+ * schlicht "Olympische Spiele" heisst), wird der vollstaendige Name behalten --
+ * ein leeres Label waere schlechter als ein redundantes.
+ */
+function hs_event_short_name( $fullName, $nameFilter ) {
+	$short = trim( (string) $fullName );
+	if ( $nameFilter === '' ) {
+		return $short;
+	}
+
+	$pos = stripos( $short, $nameFilter );
+	if ( $pos !== false ) {
+		$short = substr( $short, 0, $pos ) . substr( $short, $pos + strlen( $nameFilter ) );
+	}
+
+	// Fuehrende/abschliessende Trennzeichen entfernen.
+	$short = trim( $short, " \t\n\r\0\x0B-:/" );
+	$short = trim( preg_replace( '/\s+/u', ' ', $short ) );
+
+	return $short !== '' ? $short : trim( (string) $fullName );
 }

@@ -33,6 +33,9 @@ function hsMarkRenderComplete() {
   // Coverage-Endpoint (v84, neu): Länder-/Föderations-Aggregation für
   // Sportarten ohne Disziplin-Zwischenebene (z.B. Fußball, Tennis)
   COVERAGE_BASE: (window.HS_CACHE_BASE || "") + "/wp-json/hs-cache/v1/coverage/",
+  // NEU (Event-Template): nach Sportart gruppierte Wettbewerbe eines
+  // Multi-Sport-Events, Auswahl per Namensfilter statt kuratierter IDs.
+  EVENT_COVERAGE_BASE: (window.HS_CACHE_BASE || "") + "/wp-json/hs-cache/v1/event-coverage/",
   BUNDLE_TOTALS_BASE: (window.HS_CACHE_BASE || "") + "/wp-json/hs-cache/v1/bundle-totals/",
   };
 
@@ -262,6 +265,22 @@ async function fetchIndex() {
     }
   }
 
+  // NEU (Event-Template): Multi-Sport-Events wie Olympische Spiele. Liefert
+  // die nach Sportart gruppierten Wettbewerbe, ausgewaehlt ueber den
+  // Namensfilter der Cluster-Zeile (Index-Spalte "nameFilter").
+  async function fetchEventCoverage(bundleKey) {
+    try {
+      const res = await fetch(CONFIG.EVENT_COVERAGE_BASE + encodeURIComponent(bundleKey));
+      if (!res.ok) throw new Error("Event-Coverage HTTP " + res.status);
+      const json = await res.json();
+      if (json && json.error) throw new Error(json.error);
+      return json;
+    } catch (e) {
+      console.warn("[hs-landing] Event-Coverage-Endpoint nicht erreichbar:", e.message);
+      return null;
+    }
+  }
+
   async function fetchBundleTotals(bundleKey) {
     try {
       const res = await fetch(CONFIG.BUNDLE_TOTALS_BASE + encodeURIComponent(bundleKey));
@@ -389,12 +408,10 @@ async function fetchSheetCSV(gid) {
   // automatisch aus dem aggregierten /coverage/{sport}-Endpoint statt aus
   // Disziplin-Kacheln. Wintersport (14 Disziplinen) bleibt unverändert,
   // da disciplines.length dort > 0 ist.
-  const useCoverageMode = disciplines.length === 0;
   // v85: bundleKey vor dem Coverage-Request normalisieren (slugify), damit
   // Umlaute/ß/Gross-Kleinschreibung im data-bundle-Attribut (z.B. "fußball")
   // sprachunabhaengig auf denselben ASCII-Slug treffen wie im Backend.
   const normalizedBundleKey = slugify(bundleKey);
-  const coverageData = useCoverageMode ? await fetchCoverage(normalizedBundleKey) : null;
 
   // NEU (Bundle-Template): clusterTemplate="bundle" -- zeigt ausschliesslich
   // die in topCompetitions kuratierten Wettbewerbe (koennen aus mehreren
@@ -403,6 +420,20 @@ async function fetchSheetCSV(gid) {
   // Kacheln -- unabhaengig davon, ob 1 oder mehrere Sportarten beteiligt sind.
   const rawClusterTemplate = (b.clustertemplate || "").toLowerCase();
   const isBundleTemplate = rawClusterTemplate === "bundle" || rawClusterTemplate === "clubbundle";
+
+  // NEU (Event-Template): Multi-Sport-Events wie Olympische Spiele.
+  // Optik des multisport-Templates (Kachel je Sportart), aber OHNE eigene
+  // Detailseiten -- die Wettbewerbe klappen wie beim general-purpose-Template
+  // direkt in der Kachel auf. Die Auswahl der Wettbewerbe kommt aus dem
+  // Namensfilter der Cluster-Zeile, nicht aus kuratierten competition_ids.
+  const isEventTemplate = rawClusterTemplate === "event";
+
+  // Struktur-Weiche: Event-Seiten haben wie general-purpose-Seiten keine
+  // Disziplin-Zeilen im Index, ziehen ihre Struktur aber aus dem
+  // Event-Endpoint. Der regulaere Coverage-Abruf entfaellt dort deshalb.
+  const useCoverageMode = disciplines.length === 0 && !isEventTemplate;
+  const coverageData = useCoverageMode ? await fetchCoverage(normalizedBundleKey) : null;
+  const eventData = isEventTemplate ? await fetchEventCoverage(normalizedBundleKey) : null;
 
 
     // NEU: Fuer das Bundle-Template (mehrere Sport-Tabs kuratiert zusammengefuehrt)
@@ -478,7 +509,13 @@ const totalEvents = disciplineData.reduce((s, d) => s + d.total_events, 0);
   // Stats-Bar-Werte: im Coverage-Modus aus coverageData ableiten,
   // sonst unverändert wie bisher aus disciplineData.
 
-  const statBarValues = isBundleTemplate
+  const statBarValues = isEventTemplate
+    ? [
+        { val: (eventData && eventData.totalSports) || 0, label: f(b, "labelSports", g.labelsports || "Sportarten") },
+        { val: (eventData && eventData.totalEvents) || 0, label: f(b, "labelEvents", g.labelevents || "Events gesamt") },
+        { val: (eventData && eventData.totalLive) || 0, label: f(b, "labelLive", g.labellive || "Live") },
+      ]
+    : isBundleTemplate
     ? [
         { val: (bundleTotals && bundleTotals.totalEvents) || 0, label: f(b, "labelSports", g.labelsports || "Spiele") },
         { val: (bundleTotals && bundleTotals.liveCompetitions) || 0, label: f(b, "labelLive", g.labellive || "Live") },
@@ -567,7 +604,14 @@ index.forEach(function(d) {
   });
 });
 root.innerHTML = renderHeroCluster(bundleName, b, g) + renderStatsBar(statBarValues) +
-(isBundleTemplate
+(isEventTemplate
+  // Kein renderCoverageIntro(): renderEventSportCards() bringt Eyebrow,
+  // Titel und Trennbalken selbst mit -- wie renderClusterCards() beim
+  // multisport-Template. Sonst stuende die Ueberschrift doppelt da.
+  ? (eventData && eventData.sports && eventData.sports.length
+      ? renderEventSportCards(eventData, b, g, normalizedBundleKey)
+      : '<section class="hs-cards-section"><div class="hs-container"><p style="text-align:center;color:#888;padding:2rem;">' + (f(b, "labelNoCompetitions", g.labelnocompetitions || "Keine Wettbewerbe gefunden.")) + '</p></div></section>')
+  : isBundleTemplate
   ? renderCoverageIntro(b, g) +
     (hasTopCompetitions
       ? renderTopCompetitionsCards(validTopCompetitions, b, g, normalizedBundleKey, sportKeyToDisplayName, showSportPill)
@@ -2733,6 +2777,86 @@ function renderTopCompetitionsCards(topCompetitions, b, g, bundleKey, sportKeyTo
         "</div>" +
       "</section>"
     );
+  }
+
+  // ── Event-Template: Kachel je Sportart, Wettbewerbe klappen inline auf ────
+  // Optik = multisport (renderClusterCards), Verhalten = general-purpose
+  // (hsToggleCompetitionPanel / hsRenderCompetitionPanel). Bewusst KEINE
+  // Detailseiten: bei einem Event wie Olympia gibt es Suchintention fuer das
+  // Event als Ganzes, nicht fuer "Olympia-Biathlon" als eigenes Produkt.
+  function renderEventSportCards(eventData, b, g, bundleKey) {
+    const eyebrow    = f(b, "sportEyebrow", "ENTHALTENE SPORTARTEN");
+    const title      = (g.sporttitle || "Was ist im Paket?");
+    const detailsTxt = f(b, "detailsText", g.detailstext || "Details anzeigen");
+
+    const lblEvents = f(b, "labelEvents", g.labelevents || "Events");
+    const lblLive   = f(b, "labelLive",   g.labellive   || "Live Coverage");
+
+    window.hsCompetitionPanelData = window.hsCompetitionPanelData || {};
+
+    const cards = (eventData.sports || []).map(function(sport, idx) {
+      var panelId = "hs-tc-panel-" + bundleKey + "-sport-" + idx;
+
+      // Die aufklappbare Liste nutzt dieselbe Datenstruktur wie die
+      // Laender-/Foederations-Panels. compRowHtml() liest c.name, deshalb
+      // steht dort der gekuerzte Name ("Slalom" statt "Olympische
+      // Winterspiele - Slalom") -- der Event-Kontext ergibt sich aus Titel,
+      // H1 und der Sportart-Ueberschrift der Kachel.
+      var comps = (sport.events || []).map(function(ev) {
+        return {
+          name: ev.shortName || ev.name,
+          fullName: ev.name,
+          competition_id: ev.compId,
+          seasonMatches: ev.matches,
+          liveScores: ev.liveScores,
+          liveTicker: ev.liveTicker,
+          statsList: ev.statsList,
+          gender: ev.gender,
+          age: ev.age,
+          sport: ev.sport,
+          country_iso: ""
+        };
+      });
+
+      // topCount = alle Events: der Vorrenderer schreibt damit die komplette
+      // Liste in den Snapshot statt nur der ueblichen 3 Vorschauzeilen. Bei
+      // Fussball waeren das 401 Zeilen (Boilerplate-Verwaesserung), bei einem
+      // Event sind es pro Sportart eine Handvoll -- und genau diese Events
+      // sind der Grund, warum die Seite ueberhaupt gefunden werden soll.
+      window.hsCompetitionPanelData[panelId] = {
+        competitions: comps,
+        groupLabel: sport.name,
+        countryIso: "",
+        topCount: comps.length
+      };
+
+      var liveTag = sport.liveCount > 0 ? '<span class="hs-lt-badge">● LIVE</span>' : "";
+
+      return (
+        '<div class="hs-tc-card-wrap" style="display:block !important;position:relative !important;">' +
+          '<button type="button" class="hs-card hs-tc-card fade-in" ' +
+            'aria-expanded="false" aria-controls="' + panelId + '" ' +
+            'onclick="window.hsToggleCompetitionPanel(this, \'' + panelId + '\')">' +
+            '<div class="hs-card-head"><span class="hs-card-sport">' + sport.name + '</span>' + liveTag + '</div>' +
+            '<div class="hs-card-body">' +
+              '<div class="hs-card-stat"><span class="hs-stat-num">' + sport.eventCount + '</span><span class="hs-stat-lbl">' + lblEvents + '</span></div>' +
+              '<div class="hs-card-stat"><span class="hs-stat-num">' + sport.liveCount + '</span><span class="hs-stat-lbl">' + lblLive + '</span></div>' +
+            '</div>' +
+            '<div class="hs-card-footer"><div class="hs-card-footer-link">' + detailsTxt + ' <span class="hs-arrow hs-tc-arrow">→</span></div></div>' +
+          '</button>' +
+          '<div class="hs-tc-panel" id="' + panelId + '" hidden></div>' +
+        '</div>'
+      );
+    }).join("");
+
+    return '<section class="hs-cards-section" id="hs-disciplines">' +
+      '<div class="hs-container">' +
+        '<span class="hs-section-eyebrow">' + eyebrow + '</span>' +
+        '<h2 class="hs-section-title">' + title + '</h2>' +
+        '<span class="hs-section-bar"></span>' +
+        '<div class="hs-cards-grid hs-tc-grid">' + cards + '</div>' +
+      '</div>' +
+    '</section>';
   }
 
 function renderClusterCards(disciplines, b, g) {

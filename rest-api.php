@@ -83,6 +83,20 @@ function hs_register_rest_routes() {
 	] );
 
 
+	// GET /wp-json/hs-cache/v1/event-coverage/{slug}
+	// NEU (Event-Template): Multi-Sport-Events wie Olympische Spiele.
+	// Auswahl per Namensfilter (Index-Spalte "nameFilter") statt kuratierter
+	// competition_ids, Gruppierung nach Sportart statt nach Land/Foederation.
+	// Logik in cache.php (hs_build_event_coverage()).
+	register_rest_route( 'hs-cache/v1', '/event-coverage/(?P<slug>[a-zA-Z0-9_-]+)', [
+		'methods'             => 'GET',
+		'callback'            => 'hs_rest_get_event_coverage',
+		'permission_callback' => '__return_true',
+		'args'                => [
+			'slug' => [ 'required' => true, 'sanitize_callback' => 'sanitize_title' ],
+		],
+	] );
+
 	// GET /wp-json/hs-cache/v1/bundle-totals/{bundle}
 	// Liefert totalEvents / livetickCount / liveCompetitions fuer eine
 	// Bundle-Cluster-Zeile (z.B. "us-sports"), die mehrere Einzelsport-Tabs
@@ -247,6 +261,32 @@ function hs_rest_get_coverage( WP_REST_Request $request ) {
     $response->header( 'Cache-Control', 'public, max-age=3600' );
     $response->header( 'Access-Control-Allow-Origin', '*' );
     return $response;
+}
+
+/**
+ * GET /wp-json/hs-cache/v1/event-coverage/{slug}
+ * Liefert die nach Sportart gruppierten Wettbewerbe eines Multi-Sport-Events
+ * (Namensfilter aus der Index-Spalte "nameFilter"). Siehe cache.php.
+ */
+function hs_rest_get_event_coverage( WP_REST_Request $request ) {
+	$slug      = $request->get_param( 'slug' );
+	$cache_key = 'hs_event_coverage_' . $slug;
+	$data      = get_transient( $cache_key );
+
+	if ( $data === false ) {
+		$data = hs_build_event_coverage( $slug );
+		if ( is_wp_error( $data ) ) {
+			$code   = $data->get_error_code();
+			$status = in_array( $code, [ 'not_found', 'missing_name_filter', 'no_matches', 'no_current_events' ], true ) ? 404 : 502;
+			return new WP_REST_Response( [ 'error' => $data->get_error_message(), 'code' => $code ], $status );
+		}
+		set_transient( $cache_key, $data, HS_CACHE_TTL );
+	}
+
+	$response = new WP_REST_Response( $data, 200 );
+	$response->header( 'Cache-Control', 'public, max-age=3600' );
+	$response->header( 'Access-Control-Allow-Origin', '*' );
+	return $response;
 }
 
 /**
