@@ -609,7 +609,7 @@ root.innerHTML = renderHeroCluster(bundleName, b, g) + renderStatsBar(statBarVal
   // Titel und Trennbalken selbst mit -- wie renderClusterCards() beim
   // multisport-Template. Sonst stuende die Ueberschrift doppelt da.
   ? (eventData && eventData.sports && eventData.sports.length
-      ? renderEventSportCards(eventData, b, g, normalizedBundleKey)
+      ? renderEventSportCards(eventData, b, g, normalizedBundleKey, sportKeyToDisplayName)
       : '<section class="hs-cards-section"><div class="hs-container"><p style="text-align:center;color:#888;padding:2rem;">' + (f(b, "labelNoCompetitions", g.labelnocompetitions || "Keine Wettbewerbe gefunden.")) + '</p></div></section>')
   : isBundleTemplate
   ? renderCoverageIntro(b, g) +
@@ -2784,7 +2784,7 @@ function renderTopCompetitionsCards(topCompetitions, b, g, bundleKey, sportKeyTo
   // (hsToggleCompetitionPanel / hsRenderCompetitionPanel). Bewusst KEINE
   // Detailseiten: bei einem Event wie Olympia gibt es Suchintention fuer das
   // Event als Ganzes, nicht fuer "Olympia-Biathlon" als eigenes Produkt.
-  function renderEventSportCards(eventData, b, g, bundleKey) {
+  function renderEventSportCards(eventData, b, g, bundleKey, sportKeyToDisplayName) {
     const eyebrow    = f(b, "sportEyebrow", "ENTHALTENE SPORTARTEN");
     const title      = (g.sporttitle || "Was ist im Paket?");
     const detailsTxt = f(b, "detailsText", g.detailstext || "Details anzeigen");
@@ -2796,6 +2796,17 @@ function renderTopCompetitionsCards(topCompetitions, b, g, bundleKey, sportKeyTo
 
     const cards = (eventData.sports || []).map(function(sport, idx) {
       var panelId = "hs-tc-panel-" + bundleKey + "-sport-" + idx;
+
+      // Gruppennamen aus der sport-Spalte stehen bereits in der Sheet-
+      // Schreibweise und bleiben unveraendert. Nur tab-abgeleitete Namen
+      // (fromTab) stammen aus dem englischen Index und werden ueber die
+      // sprachrichtige Zuordnung uebersetzt -- sonst stuende "Ice Hockey"
+      // auf der deutschen Seite.
+      var sportName = sport.name;
+      if (sport.fromTab && sportKeyToDisplayName) {
+        var mapped = sportKeyToDisplayName[(sport.sportKey || "").toLowerCase()];
+        if (mapped) sportName = mapped;
+      }
 
       // Die aufklappbare Liste nutzt dieselbe Datenstruktur wie die
       // Laender-/Foederations-Panels. compRowHtml() liest c.name, deshalb
@@ -2825,7 +2836,7 @@ function renderTopCompetitionsCards(topCompetitions, b, g, bundleKey, sportKeyTo
       // sind der Grund, warum die Seite ueberhaupt gefunden werden soll.
       window.hsCompetitionPanelData[panelId] = {
         competitions: comps,
-        groupLabel: sport.name,
+        groupLabel: sportName,
         countryIso: "",
         topCount: comps.length
       };
@@ -2837,7 +2848,7 @@ function renderTopCompetitionsCards(topCompetitions, b, g, bundleKey, sportKeyTo
           '<button type="button" class="hs-card hs-tc-card fade-in" ' +
             'aria-expanded="false" aria-controls="' + panelId + '" ' +
             'onclick="window.hsToggleCompetitionPanel(this, \'' + panelId + '\')">' +
-            '<div class="hs-card-head"><span class="hs-card-sport">' + sport.name + '</span>' + liveTag + '</div>' +
+            '<div class="hs-card-head"><span class="hs-card-sport">' + sportName + '</span>' + liveTag + '</div>' +
             '<div class="hs-card-body">' +
               '<div class="hs-card-stat"><span class="hs-stat-num">' + sport.eventCount + '</span><span class="hs-stat-lbl">' + lblEvents + '</span></div>' +
               '<div class="hs-card-stat"><span class="hs-stat-num">' + sport.liveCount + '</span><span class="hs-stat-lbl">' + lblLive + '</span></div>' +

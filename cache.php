@@ -1420,14 +1420,21 @@ function hs_build_event_coverage( $slug ) {
 			if ( strpos( $hay, $needle ) === false ) continue;
 
 			// Gruppe: eigene sport-Spalte des Tabs, sonst der Tab selbst.
-			$group = trim( (string) ( $r_lc['sport'] ?? '' ) );
-			if ( $group === '' ) {
+			$group    = trim( (string) ( $r_lc['sport'] ?? '' ) );
+			$fromTab  = ( $group === '' );
+			if ( $fromTab ) {
 				$group = $tab['label'] !== '' ? $tab['label'] : $tab['key'];
 			}
 
-			$r_lc['_hs_event_group'] = $group;
-			$r_lc['_hs_sport_key']   = $tab['key'];
-			$matched[]               = $r_lc;
+			$r_lc['_hs_event_group']    = $group;
+			$r_lc['_hs_sport_key']      = $tab['key'];
+			// Merker fuer das Frontend: Gruppennamen, die aus dem Tab stammen,
+			// kommen aus dem ENGLISCHEN Index (hs_fetch_index()) und muessen auf
+			// DE-Seiten uebersetzt werden ("Ice Hockey" -> "Eishockey"). Namen aus
+			// der sport-Spalte sind dagegen bereits die Sheet-Schreibweise und
+			// duerfen nicht angefasst werden.
+			$r_lc['_hs_group_from_tab'] = $fromTab;
+			$matched[]                  = $r_lc;
 		}
 	}
 
@@ -1485,6 +1492,7 @@ function hs_build_event_coverage( $slug ) {
 				'name'       => $group,
 				'key'        => hs_slugify( $group ),
 				'sportKey'   => $row['_hs_sport_key'],
+				'fromTab'    => ! empty( $row['_hs_group_from_tab'] ),
 				'events'     => [],
 				'eventCount' => 0,
 				'liveCount'  => 0,
