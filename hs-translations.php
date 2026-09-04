@@ -373,8 +373,17 @@ $prompt =
 "'Punkte 2. DG' -> 'Points 2nd Run'.\n" .
 "4. If a label needs no translation at all, return it EXACTLY as given.\n" .
 "5. Never add explanations, units or extra words.\n" .
+"6. Some inputs are not German at all but technical field identifiers in " .
+"snake_case, delivered that way by the data provider ('corner_kicks', " .
+"'fieldgoals_threepoints_made', 'balls_touched_percentage'). Do NOT return " .
+"those unchanged -- resolve them into the short readable label they stand " .
+"for: 'corner_kicks' -> 'Corner Kicks', 'fieldgoals_threepoints_made' -> " .
+"'3-Point FG Made', 'balls_touched_percentage' -> 'Ball Touches %', " .
+"'rebounds_offensive' -> 'Offensive Rebounds'.\n" .
+"7. Return EVERY input string as a key of the JSON object, without " .
+"exception, even when the value ends up identical to the input.\n" .
 $glossary_hint . "\n" .
-"Return ONLY a JSON object: each key is the original German string, each value " .
+"Return ONLY a JSON object: each key is the original string, each value " .
 "the result.\n" .
 "Input: " . wp_json_encode( array_values( $to_translate ) );
 } else {
@@ -445,6 +454,24 @@ $glossary_hint . "\n" .
 				}
 			}
 			$result[ $orig ] = $translated;
+		}
+
+		// Was das Modell nicht zurueckgeliefert hat, bleibt sonst dauerhaft
+		// "fehlend": jeder weitere Seitenaufruf meldet denselben Begriff erneut
+		// an und loest nach Ablauf des Locks einen weiteren kostenpflichtigen
+		// Aufruf aus -- ohne Aussicht auf ein anderes Ergebnis. Fuer die
+		// Statistik-Beschriftungen wird der Begriff deshalb auf sich selbst
+		// abgebildet: die Pille zeigt dann den Originaltext (wie bisher), aber
+		// die Schleife ist zu. Ueber den Admin-Button "Alle Uebersetzungen
+		// zuruecksetzen" laesst sich das jederzeit neu aufrollen.
+		// Nur bei erfolgreicher Antwort ($decoded ist ein Array) -- ein
+		// kaputter API-Aufruf darf nicht den ganzen Bestand einfrieren.
+		if ( strpos( (string) $cache_key, 'stats_' ) === 0 ) {
+			foreach ( $to_translate as $s ) {
+				if ( ! isset( $result[ $s ] ) ) {
+					$result[ $s ] = $s;
+				}
+			}
 		}
 	}
 
