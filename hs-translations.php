@@ -275,7 +275,7 @@ if ( $processed >= HS_TRANSLATE_CHUNKS_PER_RUN ) {
 break;
 }
 
-$translated = hs_openai_translate_batch( $chunk, $lang );
+$translated = hs_openai_translate_batch( $chunk, $lang, $cache_key );
 $processed++;
 
 if ( empty( $translated ) ) {
@@ -304,7 +304,7 @@ delete_transient( $lock_key );
 
 // ── OpenAI-Call (serverseitig, Key nie im Frontend sichtbar) ─────────────
 
-function hs_openai_translate_batch( $strings, $target_lang ) {
+function hs_openai_translate_batch( $strings, $target_lang, $cache_key = '' ) {
 	$glossary = hs_fetch_glossary( $target_lang );
 
 	$result       = [];
@@ -343,6 +343,41 @@ function hs_openai_translate_batch( $strings, $target_lang ) {
 			implode( '; ', $pairs ) . '.';
 	}
 
+// Statistik-Beschriftungen (cacheKey-Praefix "stats_", gesetzt von
+// translateEventStats() im Event-Template) brauchen einen eigenen Prompt.
+// Der Wettbewerbsnamen-Prompt unten laesst Eigennamen bewusst unangetastet
+// und uebersetzt nur generische Anteile -- bei Messgroessen wie "Fehler
+// liegend", "Nachlader Gesamt" oder "1. Zw.-zeit" ist genau das falsch:
+// hier soll ALLES uebersetzt werden, in der Fachsprache der jeweiligen
+// Sportart und kurz genug fuer die Pill-Darstellung.
+if ( strpos( (string) $cache_key, 'stats_' ) === 0 ) {
+$prompt =
+"You translate German label texts for sports statistics into " . $target_lang . ".\n" .
+"They are column headings for winter- and summer-olympic disciplines " .
+"(alpine skiing, biathlon, ski jumping, figure skating, bobsleigh, " .
+"speed skating, short track, luge, cross-country, nordic combined, " .
+"snowboard, freestyle, skeleton, ski mountaineering, ice hockey, " .
+"basketball, football).\n\n" .
+"RULES:\n" .
+"1. Use the established terminology of the sport, not a literal translation. " .
+"Examples: 'Kuer' -> 'Free Skate', 'Kurzprogramm' -> 'Short Program', " .
+"'Fehler liegend' -> 'Prone Misses', 'Fehler stehend' -> 'Standing Misses', " .
+"'Nachlader' -> 'Spare Rounds', 'Durchgang' -> 'Run', 'Lauf' -> 'Run', " .
+"'Weite Springen' -> 'Jump Distance', 'Startliste' -> 'Start List', " .
+"'Zwischenzeit' -> 'Split Time', 'Handicap Langlauf' -> " .
+"'Cross-Country Handicap'.\n" .
+"2. Keep leading ordinals and their position: '1. Durchgang' -> '1st Run', " .
+"'3. Wechsel' -> '3rd Exchange'. Never renumber.\n" .
+"3. Keep it SHORT -- these render as small badges. If the German is " .
+"abbreviated, abbreviate the result too: '1. Zw.-zeit' -> '1st Split', " .
+"'Punkte 2. DG' -> 'Points 2nd Run'.\n" .
+"4. If a label needs no translation at all, return it EXACTLY as given.\n" .
+"5. Never add explanations, units or extra words.\n" .
+$glossary_hint . "\n" .
+"Return ONLY a JSON object: each key is the original German string, each value " .
+"the result.\n" .
+"Input: " . wp_json_encode( array_values( $to_translate ) );
+} else {
 // Der Prompt ist bewusst restriktiv formuliert. Von 1.071 Wettbewerbsnamen
 // enthalten nur rund 330 einen generischen deutschen Begriff -- die uebrigen
 // sind Eigen- und Markennamen wie "Allsvenskan", "Coppa Italia" oder
@@ -369,6 +404,7 @@ $glossary_hint . "\n" .
 "Return ONLY a JSON object: each key is the original German string, each value " .
 "the result.\n" .
 "Input: " . wp_json_encode( array_values( $to_translate ) );
+}
 
 	$args = [
 		'timeout' => 30,

@@ -929,6 +929,30 @@ if (useCoverageMode || isEventTemplate) {
     });
   }
 
+  // Statistik-Beschriftungen derselben Event-Daten separat anmelden. Sie gehen
+  // NICHT in compNames: dort gilt der Wettbewerbsnamen-Prompt, der Eigennamen
+  // unveraendert laesst -- bei Messgroessen genau das falsche Verhalten.
+  // statsPillsHtml() liest das Ergebnis spaeter aus window.hsStatsAiMap.
+  if (eventData && eventData.sports) {
+    var statTerms = [];
+    var seenStat  = {};
+    eventData.sports.forEach(function(sp) {
+      (sp.events || []).forEach(function(ev) {
+        String(ev.statsList || "").split(",").forEach(function(raw) {
+          var t = raw.trim();
+          if (!t || seenStat[t]) return;
+          seenStat[t] = true;
+          statTerms.push(t);
+        });
+      });
+    });
+    if (statTerms.length) {
+      translateEventStats(statTerms, pageLang).then(function(map) {
+        if (map) window.hsStatsAiMap = map;
+      });
+    }
+  }
+
   if (compNames.length) {
     hsTranslationPromise = translateCompetitions(compNames, pageLang, normalizedBundleKey).then(function(translations){
       if (translations) window.hsCompTranslations = translations;
@@ -1902,6 +1926,31 @@ items.push({
     return stored;
   }
 
+  // ── Auto-Uebersetzung der Statistik-Beschriftungen (nur Event-Template) ──
+  // Bei den regulaeren Cluster-Seiten bleiben die Statistik-Schluessel bewusst
+  // aussen vor (siehe Kommentar bei addCompName): dort liefert die Quelle
+  // technische Feldnamen wie "ball_win_removed_opponents", fuer die das
+  // Sheet-Feld statsTranslations zustaendig ist. Die Wintersport-Tabs liefern
+  // dagegen ausgeschriebene deutsche Beschriftungen ("Punkte 1. Durchgang",
+  // "Fehler liegend", "Kür"), die auf der englischen Seite sonst deutsch
+  // stehen bleiben -- 141 Begriffe ueber die 15 olympischen Sportarten.
+  //
+  // Eigener cacheKey statt "comp_all": serverseitig wählt
+  // hs_openai_translate_batch() anhand des Praefix "stats_" einen Prompt fuer
+  // Messgroessen statt fuer Wettbewerbsnamen. Ein gemeinsamer Schluessel ueber
+  // alle Sportarten, weil "Gesamt" oder "Startliste" in vielen davon vorkommt.
+  async function translateEventStats(terms, targetLang) {
+    if (!targetLang || targetLang.toLowerCase().startsWith("de")) return null;
+    var unique = Array.from(new Set(terms.filter(Boolean)));
+    if (!unique.length) return null;
+
+    var cacheKey = "stats_all";
+    var stored = await fetchStoredTranslations(targetLang, cacheKey);
+    var missing = unique.filter(function(s) { return !(s in stored); });
+    if (missing.length) queueMissingTranslations(targetLang, cacheKey, missing);
+    return stored;
+  }
+
 // ── Uebersetzung einzelner Wettbewerbsnamen ───────────────────────────────
   // Exakter Nachschlag, bewusst OHNE die Teilstring-Suche aus
   // applyCompetitionTranslations(): Bei rund 1.100 Eintraegen in der Map waere
@@ -2608,9 +2657,16 @@ function finalizeCompetitionTranslations(translations, root, validTopCompetition
     function statsPillsHtml(statsListRaw) {
       var arr = (statsListRaw || "").split(",").map(function(s){ return s.trim(); }).filter(Boolean);
       if (!arr.length) return '<span class="hs-no-data">–</span>';
+      // Reihenfolge der Quellen: das handgepflegte Sheet-Feld
+      // statsTranslations gewinnt immer, danach greift die per OpenAI
+      // erzeugte Map der Event-Seiten (window.hsStatsAiMap, cacheKey
+      // "stats_all"), zuletzt bleibt der deutsche Originalbegriff stehen.
+      // Auf deutschen Seiten ist hsStatsAiMap nie gesetzt -- translateEventStats()
+      // steigt fuer pageLang "de" sofort aus.
       var mapped = arr.map(function(s) {
         var statsMap = window.hsStatsTranslationMap || {};
-        return statsMap[s.toLowerCase()] || s;
+        var aiMap    = window.hsStatsAiMap || {};
+        return statsMap[s.toLowerCase()] || aiMap[s] || s;
       });
       var tagsHtml = mapped.map(function(s) { return '<span class="hs-stat-tag">' + s + '</span>'; }).join("");
       return '<div class="hs-stat-tags-wrap">' + tagsHtml + '</div>';
