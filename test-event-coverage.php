@@ -122,9 +122,14 @@ else {
 	check( 'Vollname erhalten', $alpin[1]['name'], 'Olympische Winterspiele - Slalom' );
 	check( 'Saisons dedupliziert', count( $alpin ), 3 );
 	// result_list muss wie stats_list behandelt werden (Wintersport-Tab).
+	// Massgeblich ist die letzte ABGESCHLOSSENE Saison (siehe
+	// hs_build_last_season_family_stats()), hier also die Zeile mit
+	// season_end = -400 Tage und nicht die angekuendigte Saison. Der Stub
+	// kennt ueberhaupt keine stats_list-Spalte -- kaeme hier ein Wert an,
+	// stammt er zwangslaeufig aus result_list.
 	$slalom = null;
 	foreach ( $alpin as $ev ) { if ( $ev['shortName'] === 'Slalom' ) $slalom = $ev; }
-	check( 'result_list als statsList', $slalom ? $slalom['statsList'] : '(kein Slalom)', '1. Durchgang,Gesamt,Startliste' );
+	check( 'result_list als statsList', $slalom ? $slalom['statsList'] : '(kein Slalom)', 'Gesamt,Startliste' );
 }
 
 echo "\n--- Sommerspiele (ohne sport-Spalte, tab-uebergreifend) ---\n";

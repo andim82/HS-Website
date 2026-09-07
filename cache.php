@@ -429,6 +429,43 @@ function hs_country_to_iso( $country_name ) {
 }
 
 /**
+ * Sammelt alle Sport-Tabs des Index: jede Cluster-Zeile mit gid, dedupliziert
+ * ueber die gid.
+ *
+ * Gemeinsame Grundlage der beiden tabuebergreifenden Templates -- Event
+ * (Auswahl per Namensfilter) und Bundle (Auswahl per kuratierter
+ * competition_id). Beide muessen die beteiligten Tabs dadurch NICHT mehr in
+ * der Spalte "bundle" auflisten; "bundleName" ist dort ein freier Paketname.
+ *
+ * @param  array $index Index-Sheet-Zeilen.
+ * @return array [ gid => [ 'key' => discipline_key-Slug, 'label' => Anzeigename ] ]
+ */
+function hs_collect_sport_tabs( array $index ) {
+	$tabs = [];
+
+	foreach ( $index as $row ) {
+		$row_lc = array_change_key_case( $row, CASE_LOWER );
+		$type   = isset( $row_lc['type'] ) ? strtolower( trim( $row_lc['type'] ) ) : '';
+		if ( $type !== 'cluster' ) continue;
+
+		$gid = isset( $row_lc['gid'] ) ? trim( (string) $row_lc['gid'] ) : '';
+		if ( $gid === '' || isset( $tabs[ $gid ] ) ) continue;
+
+		$dk = isset( $row_lc['discipline_key'] ) ? hs_slugify( $row_lc['discipline_key'] ) : '';
+		$bn = isset( $row_lc['bundlename'] ) ? hs_slugify( $row_lc['bundlename'] ) : '';
+
+		$tabs[ $gid ] = [
+			'key'   => $dk !== '' ? $dk : $bn,
+			'label' => trim( (string) (
+				$row_lc['displayname'] ?? $row_lc['name'] ?? $row_lc['bundlename'] ?? ''
+			) ),
+		];
+	}
+
+	return $tabs;
+}
+
+/**
  * Ermittelt die gid der Cluster-Zeile fuer $sport und aggregiert deren CSV-Tab.
  * Findet die Cluster-Zeile ueber discipline_key ODER bundleName.
  *
@@ -449,6 +486,7 @@ function hs_build_coverage_for_sport( $sport ) {
 	$gid = null;
 	$curated_ids = [];
 	$bundleRaw = '';
+	$clusterTpl = '';
 
 	foreach ( $index as $row ) {
 		$row_lc = array_change_key_case( $row, CASE_LOWER );
@@ -461,6 +499,7 @@ function hs_build_coverage_for_sport( $sport ) {
 		if ( $bundleNameSlug === $sport || $disciplineKeySlug === $sport ) {
 			$gid = isset( $row_lc['gid'] ) ? trim( $row_lc['gid'] ) : null;
 			$bundleRaw = isset( $row_lc['bundle'] ) ? trim( $row_lc['bundle'] ) : '';
+			$clusterTpl = isset( $row_lc['clustertemplate'] ) ? strtolower( trim( $row_lc['clustertemplate'] ) ) : '';
 
 			if ( isset( $row_lc['topcompetitions'] ) && trim( $row_lc['topcompetitions'] ) !== '' ) {
 				$curated_ids = array_map( 'trim', explode( ',', $row_lc['topcompetitions'] ) );
@@ -470,7 +509,9 @@ function hs_build_coverage_for_sport( $sport ) {
 		}
 	}
 
-	if ( $gid === null && $bundleRaw === '' ) {
+	// Das Bundle-Template braucht beides nicht: es sucht seine competition_ids
+	// ueber alle Sport-Tabs (Fall B unten).
+	if ( $gid === null && $bundleRaw === '' && $clusterTpl !== 'bundle' ) {
 		return new WP_Error( 'not_found', 'Kein gid/bundle fuer Cluster-Bundle "' . $sport . '" im Index-Sheet gefunden.' );
 	}
 
@@ -490,81 +531,111 @@ function hs_build_coverage_for_sport( $sport ) {
 		return hs_aggregate_coverage( $rows, $curated_ids );
 	}
 
-	// ── Fall B: Bundle ohne eigene gid -- mehrere Sport-Tabs zusammenfuehren ─
-	$memberNames = array_values( array_filter( array_map( 'trim', explode( ',', $bundleRaw ) ), function( $v ) { return $v !== ''; } ) );
+	// ── Fall B: Cluster ohne eigene gid -- mehrere Sport-Tabs zusammenfuehren ─
+	//
+	// Bundle-Template (clusterTemplate="bundle"): die in "topCompetitions"
+	// gepflegten competition_ids werden ueber ALLE Sport-Tabs gesucht, also
+	// jede Cluster-Zeile mit gid -- dieselbe Mechanik wie beim Event-Template.
+	// Die Spalte "bundle" muss die beteiligten Tabs damit nicht mehr
+	// auflisten, und "bundleName" ist wieder ein freier Paketname
+	// ("US Sports" statt "Basketball,American_Football,Eishockey,Fußball").
+	//
+	// Zulaessig ist das, weil competition_id tabuebergreifend eindeutig ist:
+	// ueber die fuenf Tabs hinweg 3.299 IDs, keine einzige doppelt. Ein
+	// Treffer ist also immer der gemeinte Wettbewerb.
+	//
+	// Alle uebrigen Cluster ohne eigene gid (clubBundle) behalten die
+	// Mitglieder-Liste aus der Spalte "bundle" -- dort ist die Einschraenkung
+	// auf einen Tab gewollt.
+	$memberErrors = [];
+	$tabs         = [];
 
-	if ( empty( $memberNames ) ) {
-		return new WP_Error( 'not_found', 'Bundle "' . $sport . '" hat weder eigene gid noch Mitglieder in Spalte "bundle".' );
+	if ( $clusterTpl === 'bundle' ) {
+		$tabs = hs_collect_sport_tabs( $index );
+		if ( empty( $tabs ) ) {
+			return new WP_Error(
+				'no_tabs',
+				'Bundle "' . $sport . '": keine Sport-Tabs (Cluster-Zeilen mit gid) im Index-Sheet gefunden.'
+			);
+		}
+	} else {
+		$memberNames = array_values( array_filter( array_map( 'trim', explode( ',', $bundleRaw ) ), function( $v ) { return $v !== ''; } ) );
+
+		if ( empty( $memberNames ) ) {
+			return new WP_Error( 'not_found', 'Bundle "' . $sport . '" hat weder eigene gid noch Mitglieder in Spalte "bundle".' );
+		}
+
+		foreach ( $memberNames as $memberName ) {
+			$memberSlug = hs_slugify( $memberName );
+			$memberGid = null;
+			$memberDisplayName = $memberName;
+
+			foreach ( $index as $row ) {
+				$row_lc = array_change_key_case( $row, CASE_LOWER );
+				$type   = isset( $row_lc['type'] ) ? strtolower( trim( $row_lc['type'] ) ) : '';
+				if ( $type !== 'cluster' ) continue;
+
+				$bn = isset( $row_lc['bundlename'] ) ? hs_slugify( $row_lc['bundlename'] ) : '';
+				$dk = isset( $row_lc['discipline_key'] ) ? hs_slugify( $row_lc['discipline_key'] ) : '';
+
+				if ( $bn === $memberSlug || $dk === $memberSlug ) {
+					$memberGid = isset( $row_lc['gid'] ) ? trim( $row_lc['gid'] ) : null;
+					$memberDisplayName = trim( (string) (
+						$row_lc['displayname'] ?? $row_lc['name'] ?? $row_lc['bundlename'] ?? $memberName
+					) );
+					// FIX: memberSlug auf den tatsaechlichen disciplinekey der gefundenen
+					// Cluster-Zeile normalisieren (falls die Bundle-Spalte einen leicht
+					// abweichenden Namen enthaelt als der disciplinekey selbst). Dadurch
+					// matcht der spaeter gesetzte _hs_sport_key IMMER exakt den Schluessel,
+					// den das Frontend aus index/indexDe (disciplinekey) aufbaut.
+					if ( $dk !== '' ) {
+						$memberSlug = $dk;
+					} elseif ( $bn !== '' ) {
+						$memberSlug = $bn;
+					}
+					break;
+				}
+			}
+
+			if ( ! $memberGid ) {
+				$memberErrors[] = $memberName . ': keine gid gefunden';
+				continue;
+			}
+
+			$tabs[ $memberGid ] = [ 'key' => $memberSlug, 'label' => $memberDisplayName ];
+		}
 	}
 
+	// Kuratierte IDs schon beim Einlesen anwenden statt erst nach dem Merge:
+	// ueber alle Tabs sind das 20.584 Zeilen, von denen bei einem Bundle nur
+	// eine Handvoll gebraucht wird.
+	$curatedSet = ! empty( $curated_ids ) ? array_flip( $curated_ids ) : null;
 	$mergedRows = [];
-	$memberErrors = [];
 
-	foreach ( $memberNames as $memberName ) {
-		$memberSlug = hs_slugify( $memberName );
-		$memberGid = null;
-		$memberDisplayName = $memberName;
+	foreach ( $tabs as $tabGid => $tab ) {
+		$tabRows = hs_fetch_csv( $tabGid );
+		if ( is_wp_error( $tabRows ) ) {
+			$label = $tab['label'] !== '' ? $tab['label'] : $tabGid;
+			$memberErrors[] = $label . ' (gid ' . $tabGid . '): ' . $tabRows->get_error_message();
+			continue;
+		}
 
-		foreach ( $index as $row ) {
-			$row_lc = array_change_key_case( $row, CASE_LOWER );
-			$type   = isset( $row_lc['type'] ) ? strtolower( trim( $row_lc['type'] ) ) : '';
-			if ( $type !== 'cluster' ) continue;
-
-			$bn = isset( $row_lc['bundlename'] ) ? hs_slugify( $row_lc['bundlename'] ) : '';
-			$dk = isset( $row_lc['discipline_key'] ) ? hs_slugify( $row_lc['discipline_key'] ) : '';
-
-			if ( $bn === $memberSlug || $dk === $memberSlug ) {
-				$memberGid = isset( $row_lc['gid'] ) ? trim( $row_lc['gid'] ) : null;
-				$memberDisplayName = trim( (string) (
-					$row_lc['displayname'] ?? $row_lc['name'] ?? $row_lc['bundlename'] ?? $memberName
-				) );
-				// FIX: memberSlug auf den tatsaechlichen disciplinekey der gefundenen
-				// Cluster-Zeile normalisieren (falls die Bundle-Spalte einen leicht
-				// abweichenden Namen enthaelt als der disciplinekey selbst). Dadurch
-				// matcht der spaeter gesetzte _hs_sport_key IMMER exakt den Schluessel,
-				// den das Frontend aus index/indexDe (disciplinekey) aufbaut.
-				if ( $dk !== '' ) {
-					$memberSlug = $dk;
-				} elseif ( $bn !== '' ) {
-					$memberSlug = $bn;
-				}
-				break;
+		foreach ( $tabRows as $tr ) {
+			if ( $curatedSet !== null ) {
+				$tr_lc = array_change_key_case( $tr, CASE_LOWER );
+				$cid   = trim( (string) ( $tr_lc['competition_id'] ?? '' ) );
+				if ( $cid === '' || ! isset( $curatedSet[ $cid ] ) ) continue;
 			}
+			$tr['_hs_sport_key'] = $tab['key'];
+			$mergedRows[] = $tr;
 		}
-
-		if ( ! $memberGid ) {
-			$memberErrors[] = $memberName . ': keine gid gefunden';
-			continue;
-		}
-
-		$memberRows = hs_fetch_csv( $memberGid );
-		if ( is_wp_error( $memberRows ) ) {
-			$memberErrors[] = $memberName . ' (gid ' . $memberGid . '): ' . $memberRows->get_error_message();
-			continue;
-		}
-
-		foreach ( $memberRows as &$mr ) {
-			$mr['_hs_sport_key'] = $memberSlug;
-		}
-		unset( $mr );
-
-		$mergedRows = array_merge( $mergedRows, $memberRows );
 	}
 
 	if ( empty( $mergedRows ) ) {
 		return new WP_Error(
 			'no_member_data',
-			'Bundle "' . $sport . '": keine Daten aus den Mitglieds-Tabs geladen (' . implode( ' | ', $memberErrors ) . ')'
+			'Bundle "' . $sport . '": keine Daten aus den Sport-Tabs geladen (' . implode( ' | ', $memberErrors ) . ')'
 		);
-	}
-
-	if ( ! empty( $curated_ids ) ) {
-		$curatedSet = array_flip( $curated_ids );
-		$mergedRows = array_values( array_filter( $mergedRows, function( $row ) use ( $curatedSet ) {
-			$row_lc = array_change_key_case( $row, CASE_LOWER );
-			$cid = trim( (string) ( $row_lc['competition_id'] ?? '' ) );
-			return $cid !== '' && isset( $curatedSet[ $cid ] );
-		} ) );
 	}
 
 	return hs_aggregate_coverage( $mergedRows, $curated_ids );
@@ -937,49 +1008,81 @@ function hs_build_bundle_totals( $bundle_slug ) {
 		return new WP_Error( 'not_found', 'Bundle-Cluster-Zeile fuer "' . $bundle_slug . '" nicht im Index-Sheet gefunden.' );
 	}
 
-	$memberNamesRaw = trim( (string) ( $bundleRow['bundle'] ?? '' ) );
-	$memberNames    = array_values( array_filter( array_map( 'trim', explode( ',', $memberNamesRaw ) ), function( $v ) { return $v !== ''; } ) );
+	$clusterTpl   = strtolower( trim( (string) ( $bundleRow['clustertemplate'] ?? '' ) ) );
+	$debugMembers = [];
 
 	$curatedRaw = trim( (string) ( $bundleRow['topcompetitions'] ?? '' ) );
 	$curatedIds = array_values( array_filter( array_map( 'trim', explode( ',', $curatedRaw ) ), function( $v ) { return $v !== ''; } ) );
 	$curatedSet = array_flip( $curatedIds );
 
-	if ( empty( $memberNames ) ) {
-		return new WP_Error( 'no_members', 'Bundle "' . $bundle_slug . '" hat keine Mitglieder in Spalte "bundle".' );
+	// Gleiche Weiche wie in hs_build_coverage_for_sport(): das Bundle-Template
+	// sucht seine kuratierten competition_ids ueber ALLE Sport-Tabs, alle
+	// anderen Cluster bleiben bei der Mitglieder-Liste aus Spalte "bundle".
+	// Ohne diese Symmetrie zeigte die Kachel die Wettbewerbe aus allen Tabs,
+	// die Stats-Bar darueber aber nur die Summen der gelisteten Mitglieder.
+	$tabs = [];
+
+	$ownGid = trim( (string) ( $bundleRow['gid'] ?? '' ) );
+
+	if ( $clusterTpl === 'bundle' && $ownGid !== '' ) {
+		// Symmetrie zu Fall A in hs_build_coverage_for_sport(): traegt eine
+		// Bundle-Zeile ausnahmsweise eine eigene gid, ist genau dieser Tab
+		// gemeint -- dann duerfen die Summen nicht ueber alle Tabs laufen.
+		$tabs = [ $ownGid => [
+			'key'   => $bundle_slug,
+			'label' => trim( (string) ( $bundleRow['displayname'] ?? $bundleRow['name'] ?? $bundleRow['bundlename'] ?? $bundle_slug ) ),
+		] ];
+	} elseif ( $clusterTpl === 'bundle' ) {
+		$tabs = hs_collect_sport_tabs( $index );
+		if ( empty( $tabs ) ) {
+			return new WP_Error( 'no_tabs', 'Bundle "' . $bundle_slug . '": keine Sport-Tabs (Cluster-Zeilen mit gid) im Index-Sheet gefunden.' );
+		}
+	} else {
+		$memberNamesRaw = trim( (string) ( $bundleRow['bundle'] ?? '' ) );
+		$memberNames    = array_values( array_filter( array_map( 'trim', explode( ',', $memberNamesRaw ) ), function( $v ) { return $v !== ''; } ) );
+
+		if ( empty( $memberNames ) ) {
+			return new WP_Error( 'no_members', 'Bundle "' . $bundle_slug . '" hat keine Mitglieder in Spalte "bundle".' );
+		}
+
+		foreach ( $memberNames as $memberName ) {
+			$memberSlug = hs_slugify( $memberName );
+
+			$memberGid = null;
+			foreach ( $index as $row ) {
+				$row_lc = array_change_key_case( $row, CASE_LOWER );
+				$type   = isset( $row_lc['type'] ) ? strtolower( trim( $row_lc['type'] ) ) : '';
+				if ( $type !== 'cluster' ) continue;
+
+				$bn = isset( $row_lc['bundlename'] ) ? hs_slugify( $row_lc['bundlename'] ) : '';
+				$dk = isset( $row_lc['discipline_key'] ) ? hs_slugify( $row_lc['discipline_key'] ) : '';
+
+				if ( $bn === $memberSlug || $dk === $memberSlug ) {
+					$memberGid = isset( $row_lc['gid'] ) ? trim( $row_lc['gid'] ) : null;
+					break;
+				}
+			}
+
+			if ( ! $memberGid ) {
+				$debugMembers[] = [ 'member' => $memberName, 'error' => 'keine gid gefunden' ];
+				continue;
+			}
+
+			$tabs[ $memberGid ] = [ 'key' => $memberSlug, 'label' => $memberName ];
+		}
 	}
 
 	$totalEvents      = 0;
 	$livetickCount    = 0;
 	$liveCompetitions = 0;
 	$perCompetition   = [];
-	$debugMembers     = [];
 
-	foreach ( $memberNames as $memberName ) {
-		$memberSlug = hs_slugify( $memberName );
+	foreach ( $tabs as $tabGid => $tab ) {
+		$label = $tab['label'] !== '' ? $tab['label'] : $tabGid;
 
-		$memberGid = null;
-		foreach ( $index as $row ) {
-			$row_lc = array_change_key_case( $row, CASE_LOWER );
-			$type   = isset( $row_lc['type'] ) ? strtolower( trim( $row_lc['type'] ) ) : '';
-			if ( $type !== 'cluster' ) continue;
-
-			$bn = isset( $row_lc['bundlename'] ) ? hs_slugify( $row_lc['bundlename'] ) : '';
-			$dk = isset( $row_lc['discipline_key'] ) ? hs_slugify( $row_lc['discipline_key'] ) : '';
-
-			if ( $bn === $memberSlug || $dk === $memberSlug ) {
-				$memberGid = isset( $row_lc['gid'] ) ? trim( $row_lc['gid'] ) : null;
-				break;
-			}
-		}
-
-		if ( ! $memberGid ) {
-			$debugMembers[] = [ 'member' => $memberName, 'error' => 'keine gid gefunden' ];
-			continue;
-		}
-
-		$csvRows = hs_fetch_csv( $memberGid );
+		$csvRows = hs_fetch_csv( $tabGid );
 		if ( is_wp_error( $csvRows ) ) {
-			$debugMembers[] = [ 'member' => $memberName, 'gid' => $memberGid, 'error' => $csvRows->get_error_message() ];
+			$debugMembers[] = [ 'member' => $label, 'gid' => $tabGid, 'error' => $csvRows->get_error_message() ];
 			continue;
 		}
 
@@ -997,11 +1100,15 @@ function hs_build_bundle_totals( $bundle_slug ) {
 			$memberMatched[] = $compId;
 		}
 
-		$debugMembers[] = [
-			'member'                => $memberName,
-			'gid'                   => $memberGid,
-			'matchedCompetitionIds' => $memberMatched,
-		];
+		// Tabs ohne Treffer nicht in den Debug-Block schreiben: bei
+		// tabuebergreifender Suche waeren das sonst ueberwiegend Leerzeilen.
+		if ( ! empty( $memberMatched ) ) {
+			$debugMembers[] = [
+				'member'                => $label,
+				'gid'                   => $tabGid,
+				'matchedCompetitionIds' => $memberMatched,
+			];
+		}
 	}
 
 	return [
@@ -1010,10 +1117,14 @@ function hs_build_bundle_totals( $bundle_slug ) {
 		'liveCompetitions' => $liveCompetitions,
 		'perCompetition'   => $perCompetition,
 		'debug'            => [
-			'bundleSlug'  => $bundle_slug,
-			'memberNames' => $memberNames,
-			'curatedIds'  => $curatedIds,
-			'members'     => $debugMembers,
+			'bundleSlug'      => $bundle_slug,
+			// Statt der frueheren Mitglieder-Liste aus Spalte "bundle": die
+			// tatsaechlich durchsuchten Tabs. Beim Bundle-Template sind das
+			// alle, bei den uebrigen Templates die gelisteten Mitglieder.
+			'clusterTemplate' => $clusterTpl,
+			'searchedTabs'    => array_values( array_map( function( $t ) { return $t['label']; }, $tabs ) ),
+			'curatedIds'      => $curatedIds,
+			'members'         => $debugMembers,
 		],
 	];
 }
@@ -1082,7 +1193,21 @@ function hs_aggregate_coverage( array $rows, array $curated_ids = [] ) {
 		];
 	}
 
-	$sample = array_change_key_case( $rows[0], CASE_LOWER );
+	// Spaltenerkennung nicht an Zeile 0 haengen: seit das Bundle-Template
+	// ueber ALLE Sport-Tabs sucht, koennen die Zeilen aus Tabs mit
+	// unterschiedlichen Spalten stammen, und welcher Tab zuerst trifft, haengt
+	// an der Reihenfolge im Index-Sheet. Faehlt "country" ausgerechnet im
+	// erstgetroffenen Tab, verlieren sonst ALLE Zeilen die Laendergruppierung.
+	// Union ueber die ersten Zeilen statt ueber alle: innerhalb eines Tabs ist
+	// der Spaltensatz identisch, und ein Bundle behaelt nach dem Filtern auf
+	// die kuratierten IDs ohnehin nur eine Handvoll Zeilen.
+	$sample     = [];
+	$probeCount = 0;
+	foreach ( $rows as $probeRow ) {
+		if ( ++$probeCount > 500 ) break;
+		$sample += array_change_key_case( $probeRow, CASE_LOWER );
+	}
+
 	$hasCountry = array_key_exists( 'country', $sample );
 	$hasFed = array_key_exists( 'federation', $sample );
 	$hasCompId = array_key_exists( 'competition_id', $sample );
@@ -1383,25 +1508,9 @@ function hs_build_event_coverage( $slug ) {
 	}
 
 	// ── 2. Alle Sport-Tabs sammeln (Cluster-Zeilen mit gid, dedupliziert) ───
-	$tabs = [];
-	foreach ( $index as $row ) {
-		$row_lc = array_change_key_case( $row, CASE_LOWER );
-		$type   = isset( $row_lc['type'] ) ? strtolower( trim( $row_lc['type'] ) ) : '';
-		if ( $type !== 'cluster' ) continue;
-
-		$gid = isset( $row_lc['gid'] ) ? trim( (string) $row_lc['gid'] ) : '';
-		if ( $gid === '' || isset( $tabs[ $gid ] ) ) continue;
-
-		$dk = isset( $row_lc['discipline_key'] ) ? hs_slugify( $row_lc['discipline_key'] ) : '';
-		$bn = isset( $row_lc['bundlename'] ) ? hs_slugify( $row_lc['bundlename'] ) : '';
-
-		$tabs[ $gid ] = [
-			'key'   => $dk !== '' ? $dk : $bn,
-			'label' => trim( (string) (
-				$row_lc['displayname'] ?? $row_lc['name'] ?? $row_lc['bundlename'] ?? ''
-			) ),
-		];
-	}
+	// Identische Sammlung nutzt das Bundle-Template (siehe Fall B in
+	// hs_build_coverage_for_sport()), daher der gemeinsame Helper.
+	$tabs = hs_collect_sport_tabs( $index );
 
 	if ( empty( $tabs ) ) {
 		return new WP_Error( 'no_tabs', 'Keine Sport-Tabs (Cluster-Zeilen mit gid) im Index-Sheet gefunden.' );
