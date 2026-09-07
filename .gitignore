@@ -1,3 +1,7 @@
 node_modules/
 *.min.js
 !hs-landing.min.js
+
+# Zugangsdaten -- niemals committen
+.env
+.env.local
