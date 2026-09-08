@@ -1636,7 +1636,10 @@ items.push({
     }).filter(Boolean);
     if (!names.length) return "";
     if (names.length === 1) return names[0];
-    return names.slice(0, -1).join(", ") + " und " + names[names.length - 1];
+    // Bindewort sprachrichtig -- wie in formatEnumeration(). Vorher stand hier
+    // fest "und", sodass auf englischen Seiten "NBA, NHL und NFL" erschien.
+    var conjunction = isDE ? "und" : "and";
+    return names.slice(0, -1).join(", ") + " " + conjunction + " " + names[names.length - 1];
   }
 
 
